@@ -1,0 +1,54 @@
+{
+  "name": "photobooth-kiosk",
+  "version": "1.0.0",
+  "description": "Photobooth strip kiosk app: custom border templates with auto-detected photo slots, compositing, and printing to Canon SELPHY CP1500.",
+  "main": "main.js",
+  "author": "XMMBRIDGE",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "dependencies": {
+    "exifr": "^7.1.3",
+    "jimp": "^0.22.12"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.xmmbridge.photobooth",
+    "productName": "XMMBRIDGE Photobooth",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "sample-assets/**/*"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "XMMBRIDGE Photobooth"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.photography"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
+  }
+}

@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>XMMBRIDGE Photobooth</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>XMMBRIDGE Photobooth Kiosk</h1>
+    <button id="addTemplateBtn">+ Upload Template</button>
+  </header>
+
+  <!-- Replaces window.prompt(), which Electron's renderer doesn't support. -->
+  <dialog id="nameDialog">
+    <form method="dialog">
+      <p><label for="nameInput" id="nameDialogLabel">Name:</label></p>
+      <input type="text" id="nameInput" autocomplete="off" />
+      <menu>
+        <button value="cancel">Cancel</button>
+        <button value="ok" id="nameOkBtn">OK</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <!-- Asked right after picking a template PNG, before any detection is
+       finalized — the count drives which detection settings get tried. -->
+  <dialog id="slotCountDialog">
+    <form method="dialog">
+      <p><label for="slotCountInput">How many photo slots does this template have?</label></p>
+      <input type="number" id="slotCountInput" min="1" max="20" step="1" autocomplete="off" />
+      <menu>
+        <button value="cancel">Cancel</button>
+        <button value="ok">OK</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <!-- Shows the boxes found for the confirmed slot count; operator
+       confirms or discards. -->
+  <dialog id="confirmSlotsDialog">
+    <form method="dialog">
+      <p id="confirmSlotsMsg"></p>
+      <canvas id="confirmSlotsCanvas"></canvas>
+      <div class="confirm-slots-toolbar">
+        <p id="confirmSlotsCount" class="muted"></p>
+        <button type="button" id="confirmSlotsResetBtn" class="link-btn">Reset to detected</button>
+      </div>
+      <menu>
+        <button value="cancel">No, discard</button>
+        <button value="ok" id="confirmSlotsOkBtn">Yes, use these</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <!-- Bigger preview shown while hovering a template thumbnail. Fixed to
+       one screen corner so it's never clipped, regardless of card size
+       or position. -->
+  <div id="templateHoverPreview" class="hover-preview-pane" hidden>
+    <img id="templateHoverPreviewImg" alt="" />
+  </div>
+
+  <!-- Wizard: five steps, always visible as tabs. Forward tabs are disabled
+       until the steps before them are valid; any completed step can be
+       revisited directly by clicking its tab. -->
+  <nav id="wizardTabs" class="wizard-tabs">
+    <button class="tab active" data-step="layout">1. Layout</button>
+    <button class="tab" data-step="templates" disabled>2. Templates</button>
+    <button class="tab" data-step="photos" disabled>3. Photos</button>
+    <button class="tab" data-step="order" disabled>4. Order</button>
+    <button class="tab" data-step="preview" disabled>5. Preview</button>
+  </nav>
+
+  <main>
+    <!-- Step 1: how many prints on the sheet -->
+    <section id="step-layout" class="step active">
+      <h2>How many prints on this sheet?</h2>
+      <p class="muted">Photo paper is a fixed 10cm &times; 14.8cm sheet.</p>
+      <div class="layout-options">
+        <button class="layout-card" data-layout="single">
+          <div class="layout-swatch swatch-single"><span></span></div>
+          <strong>1 print</strong>
+          <span class="muted">10cm &times; 14.8cm &mdash; one design fills the sheet</span>
+        </button>
+        <button class="layout-card" data-layout="double">
+          <div class="layout-swatch swatch-double"><span></span><span></span></div>
+          <strong>2 prints</strong>
+          <span class="muted">5cm &times; 14.8cm each &mdash; cut apart after printing</span>
+        </button>
+      </div>
+
+      <h2>Saved jobs</h2>
+      <div id="savedStripGrid" class="grid"></div>
+    </section>
+
+    <!-- Step 2: pick the template(s) for the chosen layout -->
+    <section id="step-templates" class="step">
+      <h2 id="templatesHeading">Choose a template</h2>
+
+      <div id="templatesSingleWrap">
+        <div id="templateGrid_single"></div>
+      </div>
+
+      <div id="templatesDoubleWrap" hidden>
+        <label class="mirror-toggle">
+          <input type="checkbox" id="mirrorTemplatesCheckbox" checked />
+          Use the same template for both strips
+        </label>
+        <div class="side-by-side">
+          <div>
+            <h3>Left strip</h3>
+            <div id="templateGrid_left"></div>
+          </div>
+          <div id="rightTemplateWrap" hidden>
+            <h3>Right strip</h3>
+            <div id="templateGrid_right"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="wizard-nav">
+        <button id="templatesBackBtn">Back</button>
+        <button id="templatesNextBtn" disabled>Next: Photos</button>
+      </div>
+    </section>
+
+    <!-- Step 3: gather the photos (device and/or gallery, any order of picks) -->
+    <section id="step-photos" class="step">
+      <h2>Add your photos</h2>
+      <p id="photosNeededLabel"></p>
+      <div class="upload-actions">
+        <label for="photoInput" class="btn-like">Add photos&hellip;</label>
+        <input type="file" id="photoInput" accept="image/*" multiple hidden />
+        <button id="toggleGalleryBtn">Select from Google Drive gallery</button>
+        <button id="clearUploadsBtn" disabled>Clear all</button>
+        <span id="uploadStatus" class="muted"></span>
+      </div>
+
+      <div id="galleryPanel" hidden>
+        <p id="galleryFolderLabel" class="muted"></p>
+        <div class="gallery-actions">
+          <button id="chooseFolderBtn">Set / change folder</button>
+          <button id="refreshGalleryBtn">Refresh</button>
+        </div>
+        <div id="galleryGrid" class="grid"></div>
+      </div>
+
+      <div id="photoThumbs" class="grid"></div>
+
+      <div class="wizard-nav">
+        <button id="photosBackBtn">Back</button>
+        <button id="photosNextBtn" disabled>Next: Order</button>
+      </div>
+    </section>
+
+    <!-- Step 4: put the gathered photos into slot order -->
+    <section id="step-order" class="step">
+      <h2>Put your photos in order</h2>
+      <p class="muted">Drag a thumbnail to reorder it (or use the arrows). &#8635; replaces a photo.</p>
+      <div id="orderThumbs" class="thumb-strip-lg"></div>
+      <input type="file" id="replacePhotoInput" accept="image/*" hidden />
+
+      <div class="wizard-nav">
+        <button id="orderBackBtn">Back</button>
+        <button id="orderNextBtn">Next: Preview</button>
+      </div>
+    </section>
+
+    <!-- Step 5: final composite, fine-tune, print -->
+    <section id="step-preview" class="step">
+      <h2>Preview</h2>
+      <div class="preview-row">
+        <div class="pv-col pv-canvas">
+          <div id="stripCanvases"></div>
+        </div>
+        <div class="pv-col pv-controls">
+          <div class="control-line">
+            <label for="printerSelect">Printer:</label>
+            <select id="printerSelect"></select>
+          </div>
+          <div class="control-line">
+            <button id="printBtn">Print</button>
+            <button id="saveStripBtn">Save job</button>
+            <button id="newOrderBtn">Start new order</button>
+          </div>
+          <p id="printStatus"></p>
+        </div>
+        <div class="pv-col pv-sheet">
+          <p class="muted">Sheet preview</p>
+          <canvas id="sheetPreviewCanvas"></canvas>
+        </div>
+      </div>
+
+      <div class="wizard-nav">
+        <button id="previewBackBtn">Back</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
