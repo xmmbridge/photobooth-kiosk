@@ -1302,12 +1302,36 @@ function buildCalibrationSheet() {
   ctx.arc(cx, cyMid, r * 0.6, 0, Math.PI * 2);
   ctx.stroke();
 
-  // Title block, inset from the top edge.
+  // Inset rings: concentric rectangles 2, 4, 6, 8 and 10mm in from every
+  // edge, each labelled. The outermost ring you can still see on a given
+  // side of the printed paper IS how many mm that side is losing — no
+  // ruler needed, and it works even when the very edge is cropped.
+  ctx.strokeStyle = '#000000';
+  ctx.fillStyle = '#000000';
+  ctx.font = `${Math.round(mmToPx(1.8))}px system-ui, sans-serif`;
   ctx.textAlign = 'center';
-  ctx.font = `bold ${Math.round(mmToPx(5))}px system-ui, sans-serif`;
-  ctx.fillText('XMMBRIDGE Photobooth — Calibration', cx, mmToPx(14));
-  ctx.font = `${Math.round(mmToPx(3.5))}px system-ui, sans-serif`;
-  ctx.fillText(`${SHEET_WIDTH_MM}mm × ${SHEET_HEIGHT_MM}mm sheet — outer line is the full page edge`, cx, mmToPx(20));
+  ctx.textBaseline = 'middle';
+  ctx.lineWidth = 1;
+  for (const mm of [2, 4, 6, 8, 10]) {
+    const d = mmToPx(mm);
+    ctx.strokeRect(d + 0.5, d + 0.5, w - 2 * d - 1, h - 2 * d - 1);
+    // Label each side's ring where it won't collide with the ruler
+    // labels (top/left) or the centre cut line/crosshair.
+    ctx.fillText(String(mm), mmToPx(35), d + mmToPx(1)); // top
+    ctx.fillText(String(mm), mmToPx(35), h - d - mmToPx(1)); // bottom
+    ctx.fillText(String(mm), d + mmToPx(1), h * 0.6); // left
+    ctx.fillText(String(mm), w - d - mmToPx(1), h * 0.6); // right
+  }
+
+  // Title block — kept well clear of the left-ruler labels (20mm, 40mm...)
+  // and narrow enough (~75mm) that it leaves a visible margin even if the
+  // page is being enlarged a few percent.
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.font = `bold ${Math.round(mmToPx(4))}px system-ui, sans-serif`;
+  ctx.fillText('XMMBRIDGE Calibration', cx, mmToPx(32));
+  ctx.font = `${Math.round(mmToPx(2.8))}px system-ui, sans-serif`;
+  ctx.fillText(`${SHEET_WIDTH_MM} × ${SHEET_HEIGHT_MM} mm — rings = mm in from edge`, cx, mmToPx(37));
   ctx.textAlign = 'left';
 
   return sheet;

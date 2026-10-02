@@ -86,6 +86,12 @@ By default electron-builder targets the OS you run it on. Notes:
    the printed result:
    - The outer line should land exactly at the paper edge after any
      trim, with all four corner marks present.
+   - The concentric **rings** (labelled 2, 4, 6, 8, 10) are mm in from
+     the page edge. The outermost ring still visible on each side is
+     how many mm that side is losing — read it straight off the print,
+     no ruler needed. Equal loss on all sides suggests the driver is
+     enlarging the image (borderless "overscan"); loss on one side
+     only suggests an offset.
    - The numbered ticks should measure true to their millimetre labels.
    - If content is offset, cropped, or runs past the paper edge, the
      driver's paper size doesn't match ours — a common culprit is the
