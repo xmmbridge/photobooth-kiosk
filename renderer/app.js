@@ -1337,10 +1337,81 @@ function buildCalibrationSheet() {
   return sheet;
 }
 
+// ---------------------------------------------------------------------
+// Printer enlargement compensation. A borderless driver typically
+// enlarges the image a few percent so no white edge shows, which crops
+// content off every side. The operator measures how long a "20 mm" mark
+// actually printed (e.g. 21.5mm => the printer enlarges by 7.5%) and
+// enters it; every print is then pre-shrunk by that factor and centred,
+// so the driver's enlargement brings it back to exactly the paper size.
+// The gap that leaves around the image is filled by extending the
+// sheet's own edge pixels outward (so it's a bleed, not a white frame —
+// if the driver enlarges a touch less than expected, no sliver shows).
+// ---------------------------------------------------------------------
+const PRINT_MEASURED_KEY = 'printMeasured20mm';
+
+function getMeasured20() {
+  try {
+    const v = parseFloat(localStorage.getItem(PRINT_MEASURED_KEY));
+    if (Number.isFinite(v)) return v;
+  } catch { /* storage unavailable — fall through to no correction */ }
+  return 20;
+}
+
+// >= 1. Only handles printers that enlarge; 20mm measuring under 20 is
+// treated as "no correction".
+function printScaleFactor() {
+  return Math.min(1.3, Math.max(1, getMeasured20() / 20));
+}
+
+function compensateForPrinter(src) {
+  const k = printScaleFactor();
+  if (k < 1.001) return src;
+
+  const W = src.width, H = src.height;
+  const iw = W / k, ih = H / k;
+  const ox = (W - iw) / 2, oy = (H - ih) / 2;
+
+  const out = document.createElement('canvas');
+  out.width = W;
+  out.height = H;
+  const ctx = out.getContext('2d');
+
+  // Bleed: stretch the sheet's outermost pixel row/column (and corner
+  // pixel) across the margin. Drawn first, the shrunken sheet covers the
+  // middle.
+  ctx.drawImage(src, 0, 0, W, 1, ox, 0, iw, oy);                       // top
+  ctx.drawImage(src, 0, H - 1, W, 1, ox, oy + ih, iw, H - oy - ih);    // bottom
+  ctx.drawImage(src, 0, 0, 1, H, 0, oy, ox, ih);                       // left
+  ctx.drawImage(src, W - 1, 0, 1, H, ox + iw, oy, W - ox - iw, ih);    // right
+  ctx.drawImage(src, 0, 0, 1, 1, 0, 0, ox, oy);                        // corners
+  ctx.drawImage(src, W - 1, 0, 1, 1, ox + iw, 0, W - ox - iw, oy);
+  ctx.drawImage(src, 0, H - 1, 1, 1, 0, oy + ih, ox, H - oy - ih);
+  ctx.drawImage(src, W - 1, H - 1, 1, 1, ox + iw, oy + ih, W - ox - iw, H - oy - ih);
+
+  ctx.drawImage(src, ox, oy, iw, ih);
+  return out;
+}
+
+{
+  const input = document.getElementById('printMeasuredInput');
+  input.value = String(getMeasured20());
+  input.addEventListener('change', () => {
+    const v = parseFloat(input.value);
+    if (!Number.isFinite(v) || v < 20 || v > 26) {
+      input.value = String(getMeasured20()); // reject nonsense, keep the last good value
+      return;
+    }
+    try { localStorage.setItem(PRINT_MEASURED_KEY, String(v)); } catch { /* ignore */ }
+  });
+}
+
 document.getElementById('printCalibrationBtn').addEventListener('click', async () => {
   const status = document.getElementById('printStatus');
   const deviceName = document.getElementById('printerSelect').value;
-  const dataUrl = buildCalibrationSheet().toDataURL('image/png');
+  // Goes through the same compensation as a real print, so printing it
+  // again with a correction set verifies the correction.
+  const dataUrl = compensateForPrinter(buildCalibrationSheet()).toDataURL('image/png');
 
   status.textContent = 'Printing calibration sheet…';
   try {
@@ -1463,7 +1534,7 @@ document.getElementById('printBtn').addEventListener('click', async () => {
   const status = document.getElementById('printStatus');
   const deviceName = document.getElementById('printerSelect').value;
   const [left, right] = sheetCanvasArgs();
-  const sheet = buildSheetCanvas(left, right, false);
+  const sheet = compensateForPrinter(buildSheetCanvas(left, right, false));
   const dataUrl = sheet.toDataURL('image/png');
 
   status.textContent = 'Printing…';

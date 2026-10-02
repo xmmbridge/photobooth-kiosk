@@ -100,6 +100,17 @@ By default electron-builder targets the OS you run it on. Notes:
      SELPHY cassettes actually use), or vice versa. Check the exact
      size listed for your loaded cassette and set the driver's paper
      size to match it precisely, not just the closest named preset.
+   **Correcting an enlarging driver:** if a "20 mm" interval measures
+   longer than 20mm on the print (say 21.5mm), the driver is enlarging
+   the image (here 7.5%) and cropping every edge. Enter that measurement
+   in the **Measured "20 mm" mark** box on the Preview step (saved
+   between runs). Every print — including the calibration sheet — is
+   then pre-shrunk by that factor and centred, with the margin filled by
+   extending the sheet's own edge pixels (`compensateForPrinter()` in
+   `renderer/app.js`), so the driver's enlargement lands it exactly on
+   the paper. Leave it at 20 for no correction. Assumes the same scale
+   horizontally and vertically.
+
    This isolates printer/driver setup from the app itself — the pattern
    renders from `buildCalibrationSheet()` in `renderer/app.js`, not from
    any job data, so if it prints correctly but real jobs don't, the bug
