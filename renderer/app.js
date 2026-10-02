@@ -17,6 +17,7 @@ let templates = [];           // all templates known to the app
 let wizard = {
   layout: null,                // 'single' | 'double'
   mirror: true,                 // double only: same template on both sides?
+  duplicatePhotos: false,       // double + mirror only: same photos on both sides too
   templateLeft: null,           // the template (also used alone for 'single')
   templateRight: null,          // double + !mirror only
   photoPool: [],                 // [{ img, path, name }] gathered in the Photos step
@@ -94,12 +95,19 @@ function activeTemplates() {
 }
 
 function totalSlotsNeeded() {
-  return activeTemplates().reduce((sum, t) => sum + t.slots.length, 0);
+  return sideRanges().reduce((sum, r) => sum + r.count, 0);
 }
 
-// Where each side's slots start in the flattened photo order.
+// Where each side's slots start in the flattened photo order. Normally
+// one entry per side. But for a double layout with "duplicate photos" on,
+// both sides print the exact same photos with the exact same crop — so
+// there's really only one set of slots to gather/order/edit; the sheet
+// just draws that one composited strip into both halves at print time.
 function sideRanges() {
   const tpls = activeTemplates();
+  if (wizard.layout === 'double' && wizard.duplicatePhotos && tpls.length > 0) {
+    return [{ template: tpls[0], start: 0, count: tpls[0].slots.length }];
+  }
   const ranges = [];
   let start = 0;
   for (const t of tpls) {
@@ -111,7 +119,7 @@ function sideRanges() {
 
 function resetWizard() {
   wizard = {
-    layout: null, mirror: true, templateLeft: null, templateRight: null,
+    layout: null, mirror: true, duplicatePhotos: false, templateLeft: null, templateRight: null,
     photoPool: [], order: [], adjustments: []
   };
   maxReachedIndex = 0;
@@ -185,6 +193,7 @@ document.querySelectorAll('.layout-card').forEach((card) => {
     if (wizard.layout !== layout) {
       wizard.layout = layout;
       wizard.mirror = true;
+      wizard.duplicatePhotos = false;
       wizard.templateLeft = null;
       wizard.templateRight = null;
       wizard.photoPool = [];
@@ -246,6 +255,7 @@ async function loadSavedJob(rec) {
   wizard.templateLeft = tplLeft;
   wizard.templateRight = rec.layout === 'double' ? tplRight : null;
   wizard.mirror = rec.layout === 'double' && leftId === rightId;
+  wizard.duplicatePhotos = rec.layout === 'double' && wizard.mirror && !!rec.duplicatePhotos;
 
   const needed = totalSlotsNeeded();
   if (rec.photoPaths.length !== needed) {
@@ -293,6 +303,9 @@ function renderTemplatesStep() {
   } else {
     document.getElementById('mirrorTemplatesCheckbox').checked = wizard.mirror;
     document.getElementById('rightTemplateWrap').hidden = wizard.mirror;
+    // Only makes sense with one shared template design.
+    document.getElementById('duplicatePhotosRow').hidden = !wizard.mirror;
+    document.getElementById('duplicatePhotosCheckbox').checked = wizard.duplicatePhotos;
 
     renderTemplatePickerGrid('templateGrid_left', 'half', wizard.templateLeft, (t) => {
       wizard.templateLeft = t;
@@ -312,6 +325,17 @@ function renderTemplatesStep() {
 document.getElementById('mirrorTemplatesCheckbox').addEventListener('change', (e) => {
   wizard.mirror = e.target.checked;
   if (!wizard.mirror && !wizard.templateRight) wizard.templateRight = wizard.templateLeft;
+  if (!wizard.mirror) wizard.duplicatePhotos = false; // no longer meaningful
+  renderTemplatesStep();
+});
+
+document.getElementById('duplicatePhotosCheckbox').addEventListener('change', (e) => {
+  wizard.duplicatePhotos = e.target.checked;
+  // The required photo count changes immediately (doubles/halves), so
+  // whatever was gathered for the old count is no longer valid.
+  wizard.photoPool = [];
+  wizard.order = [];
+  wizard.adjustments = [];
   renderTemplatesStep();
 });
 
@@ -1185,11 +1209,18 @@ function buildSheetCanvas(left, right, showGuide) {
   return sheet;
 }
 
-function renderSheetPreview() {
+// [left, right] canvases for the sheet. Normally one per side (or just
+// `left` for a single sheet); for "duplicate photos" there's only one
+// editable strip, so it's drawn into both halves.
+function sheetCanvasArgs() {
   const canvases = sideStates.map(s => s.canvas);
-  const sheet = canvases.length > 1
-    ? buildSheetCanvas(canvases[0], canvases[1], true)
-    : buildSheetCanvas(canvases[0], null, true);
+  if (wizard.layout === 'double' && wizard.duplicatePhotos) return [canvases[0], canvases[0]];
+  return canvases.length > 1 ? [canvases[0], canvases[1]] : [canvases[0], null];
+}
+
+function renderSheetPreview() {
+  const [left, right] = sheetCanvasArgs();
+  const sheet = buildSheetCanvas(left, right, true);
   const view = document.getElementById('sheetPreviewCanvas');
   view.width = sheet.width;
   view.height = sheet.height;
@@ -1218,10 +1249,12 @@ async function renderPreviewStep() {
 
     const editor = document.createElement('div');
     editor.className = 'side-editor';
-    if (ranges.length > 1) {
+    if (wizard.layout === 'double') {
       const label = document.createElement('p');
       label.className = 'muted side-label';
-      label.textContent = sideStates.length === 1 ? 'Left strip' : 'Right strip';
+      label.textContent = wizard.duplicatePhotos
+        ? 'Both prints (identical)'
+        : (sideStates.length === 1 ? 'Left strip' : 'Right strip');
       editor.appendChild(label);
     }
 
@@ -1287,10 +1320,8 @@ document.getElementById('previewBackBtn').addEventListener('click', () => goToSt
 document.getElementById('printBtn').addEventListener('click', async () => {
   const status = document.getElementById('printStatus');
   const deviceName = document.getElementById('printerSelect').value;
-  const canvases = sideStates.map(s => s.canvas);
-  const sheet = canvases.length > 1
-    ? buildSheetCanvas(canvases[0], canvases[1], false)
-    : buildSheetCanvas(canvases[0], null, false);
+  const [left, right] = sheetCanvasArgs();
+  const sheet = buildSheetCanvas(left, right, false);
   const dataUrl = sheet.toDataURL('image/png');
 
   status.textContent = 'Printing…';
@@ -1336,6 +1367,7 @@ document.getElementById('saveStripBtn').addEventListener('click', async () => {
     name,
     layout: wizard.layout,
     templateIds,
+    duplicatePhotos: wizard.layout === 'double' && wizard.duplicatePhotos,
     photoPaths: paths,
     adjustments: wizard.adjustments.map(a => a && { zoom: a.zoom, panX: a.panX, panY: a.panY }),
     thumbnail: sheetThumbnail()

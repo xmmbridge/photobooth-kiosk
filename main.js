@@ -727,13 +727,16 @@ ipcMain.handle('strips:list', async () => {
 // template(s) used (one id, or two for independent left/right strips),
 // and the flattened photos + adjustments across all of that sheet's slots
 // (left strip's slots first, then right's, reading order within each).
-ipcMain.handle('strips:save', async (_event, { id, name, layout, templateIds, photoPaths, adjustments, thumbnail }) => {
+ipcMain.handle('strips:save', async (_event, { id, name, layout, templateIds, duplicatePhotos, photoPaths, adjustments, thumbnail }) => {
   const recId = safeStripId(id) || crypto.randomUUID();
   const record = {
     id: recId,
     name: name || 'Untitled job',
     layout: layout === 'double' ? 'double' : 'single',
     templateIds: Array.isArray(templateIds) ? templateIds.filter(Boolean) : [],
+    // 'double' only: one photo set printed identically on both strips,
+    // so photoPaths/adjustments below hold just that one set's worth.
+    duplicatePhotos: !!duplicatePhotos,
     photoPaths: Array.isArray(photoPaths) ? photoPaths : [],
     adjustments: Array.isArray(adjustments) ? adjustments : [],
     thumbnail: thumbnail || null,
