@@ -79,6 +79,25 @@ By default electron-builder targets the OS you run it on. Notes:
    already the default). Once you've confirmed the right printer/paper
    size prints correctly, flip `silent` to `true` in `main.js`'s
    `print:image` call site so customers never see a system dialog.
+6. **Print a calibration sheet** (button on the Preview step, below
+   Print — works with any job loaded) before trusting real prints. It's
+   a ruler/crosshair/registration pattern sent through the exact same
+   print path as a real job, at the exact same 100×148mm size. Measure
+   the printed result:
+   - The outer line should land exactly at the paper edge after any
+     trim, with all four corner marks present.
+   - The numbered ticks should measure true to their millimetre labels.
+   - If content is offset, cropped, or runs past the paper edge, the
+     driver's paper size doesn't match ours — a common culprit is the
+     driver reporting "4×6 in" (101.6×152.4mm, the US size) for paper
+     that's physically 100×148mm (the JIS/ISO postcard size most
+     SELPHY cassettes actually use), or vice versa. Check the exact
+     size listed for your loaded cassette and set the driver's paper
+     size to match it precisely, not just the closest named preset.
+   This isolates printer/driver setup from the app itself — the pattern
+   renders from `buildCalibrationSheet()` in `renderer/app.js`, not from
+   any job data, so if it prints correctly but real jobs don't, the bug
+   is in this app's compositing, not the print pipeline.
 
 ## Adding border templates
 

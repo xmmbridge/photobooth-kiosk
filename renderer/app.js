@@ -1209,6 +1209,124 @@ function buildSheetCanvas(left, right, showGuide) {
   return sheet;
 }
 
+// ---------------------------------------------------------------------
+// Printer calibration sheet: a measurable ruler/crosshair/registration
+// pattern, built at the exact same pixel size (SHEET_W_PX x SHEET_H_PX)
+// and pushed through the exact same print:image pipeline as a real job
+// (same pageSize, same margins:none). If a real print shows content
+// landing outside where it should, print this once and measure it: it
+// isolates whether the problem is in this app's compositing (this
+// pattern would print fine) or in the printer driver/paper setup (this
+// pattern would show the same offset/cropping a real job does).
+// ---------------------------------------------------------------------
+function buildCalibrationSheet() {
+  const mmToPx = (mm) => mm / 25.4 * SHEET_DPI;
+  const sheet = document.createElement('canvas');
+  sheet.width = SHEET_W_PX;
+  sheet.height = SHEET_H_PX;
+  const ctx = sheet.getContext('2d');
+  const w = sheet.width, h = sheet.height;
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+
+  // Full-sheet edge: a 1px frame touching the very first/last pixel row
+  // and column. If the printed paper shows white space inside this line,
+  // or the line itself is cut off, that's your registration/crop error.
+  ctx.strokeStyle = '#000000';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+
+  // Corner registration marks (small L's right at each corner) — the
+  // first thing to go missing if the driver insets or crops the page.
+  const CORNER = mmToPx(8);
+  const corners = [[0, 0, 1, 1], [w, 0, -1, 1], [0, h, 1, -1], [w, h, -1, -1]];
+  ctx.lineWidth = 2;
+  for (const [cx, cy, dx, dy] of corners) {
+    ctx.beginPath();
+    ctx.moveTo(cx, cy + dy * CORNER);
+    ctx.lineTo(cx, cy);
+    ctx.lineTo(cx + dx * CORNER, cy);
+    ctx.stroke();
+  }
+
+  // Ruler ticks every 10mm along the top and left edges, numbered every
+  // 20mm, so a measured offset reads directly in millimetres.
+  ctx.strokeStyle = '#000000';
+  ctx.fillStyle = '#000000';
+  ctx.font = `${Math.round(mmToPx(3.2))}px system-ui, sans-serif`;
+  ctx.textBaseline = 'top';
+  for (let mm = 0; mm <= SHEET_WIDTH_MM; mm += 10) {
+    const x = mmToPx(mm);
+    const long = mm % 20 === 0;
+    ctx.lineWidth = long ? 2 : 1;
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, mmToPx(long ? 6 : 3));
+    ctx.stroke();
+    if (long && mm > 0 && mm < SHEET_WIDTH_MM) ctx.fillText(String(mm), x + 3, mmToPx(7));
+  }
+  ctx.textAlign = 'left';
+  for (let mm = 0; mm <= SHEET_HEIGHT_MM; mm += 10) {
+    const y = mmToPx(mm);
+    const long = mm % 20 === 0;
+    ctx.lineWidth = long ? 2 : 1;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(mmToPx(long ? 6 : 3), y);
+    ctx.stroke();
+    if (long && mm > 0 && mm < SHEET_HEIGHT_MM) ctx.fillText(String(mm), mmToPx(7), y + 3);
+  }
+
+  // Dashed vertical line at the half-width point — where a 2-strip sheet
+  // gets cut. Useful even for a 1-print job, to sanity-check the mm scale.
+  ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([14, 14]);
+  ctx.beginPath();
+  ctx.moveTo(w / 2, 0);
+  ctx.lineTo(w / 2, h);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Center crosshair.
+  const cx = w / 2, cyMid = h / 2, r = mmToPx(6);
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx - r, cyMid);
+  ctx.lineTo(cx + r, cyMid);
+  ctx.moveTo(cx, cyMid - r);
+  ctx.lineTo(cx, cyMid + r);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cyMid, r * 0.6, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Title block, inset from the top edge.
+  ctx.textAlign = 'center';
+  ctx.font = `bold ${Math.round(mmToPx(5))}px system-ui, sans-serif`;
+  ctx.fillText('XMMBRIDGE Photobooth — Calibration', cx, mmToPx(14));
+  ctx.font = `${Math.round(mmToPx(3.5))}px system-ui, sans-serif`;
+  ctx.fillText(`${SHEET_WIDTH_MM}mm × ${SHEET_HEIGHT_MM}mm sheet — outer line is the full page edge`, cx, mmToPx(20));
+  ctx.textAlign = 'left';
+
+  return sheet;
+}
+
+document.getElementById('printCalibrationBtn').addEventListener('click', async () => {
+  const status = document.getElementById('printStatus');
+  const deviceName = document.getElementById('printerSelect').value;
+  const dataUrl = buildCalibrationSheet().toDataURL('image/png');
+
+  status.textContent = 'Printing calibration sheet…';
+  try {
+    await window.kiosk.print.image(dataUrl, deviceName, false, SHEET_PAGE_SIZE);
+    status.textContent = 'Calibration sheet sent — measure it against the printed paper.';
+  } catch (err) {
+    status.textContent = `Calibration print failed: ${err.message}`;
+  }
+});
+
 // [left, right] canvases for the sheet. Normally one per side (or just
 // `left` for a single sheet); for "duplicate photos" there's only one
 // editable strip, so it's drawn into both halves.
