@@ -15,8 +15,8 @@ make changes:
    Drive gallery.
 4. **Order** — drag (or use the arrows) to put the photos in slot
    order; replace any one of them.
-5. **Preview** — per-slot crop/zoom, live sheet preview, print, save
-   the job for later.
+5. **Preview** — per-slot crop/zoom, live sheet preview, print, and save
+   each strip for later (left and right strips save separately).
 
 ## Setup
 
@@ -56,7 +56,7 @@ By default electron-builder targets the OS you run it on. Notes:
 - App icon: drop `build/icon.ico` (Windows, 256×256) and/or
   `build/icon.icns` (macOS) and rebuild; otherwise the default Electron
   icon is used.
-- Templates, saved jobs and the gallery-folder setting are **not**
+- Templates, saved strips and the gallery-folder setting are **not**
   bundled — they live in the per-user data folder on whatever machine
   the app runs on, so each kiosk PC is configured once after install.
 - The `build` block in `package.json` holds appId, product name,
@@ -186,7 +186,9 @@ your design tool, or re-upload with a different slot count.
 **Which sheet size is a template for?** Every template is tagged
 `printSize: 'full'` (10×14.8cm) or `'half'` (5×14.8cm), guessed from
 the uploaded PNG's aspect ratio (`classifyPrintSize()` in `main.js`).
-The Templates step only offers templates matching the layout the
+Hovering a template shows a larger preview next to the cursor (it
+follows the mouse and flips sides near a window edge). The Templates
+step only offers templates matching the layout the
 operator chose. If the guess is wrong, each template card has a **"Use
 as …"** link to flip it.
 
@@ -239,7 +241,7 @@ Notes:
   sending (the print is only ~1181×1748, so nothing is lost, and
   uploads are much faster). Photos are saved to `phone-uploads/` in the
   app's data folder; **Clear phone photos** in the gallery panel empties
-  it. Photos already added to the current job stay, but saved jobs that
+  it. Photos already added to the current job stay, but saved strips that
   used them can't reopen afterwards.
 - Upload-only by design: the phone page can't list or download anything,
   every route requires the token, only images up to 25 MB are accepted,
@@ -325,42 +327,62 @@ photo's crop.
    stops at "photo covers the slot" by default but can go further, down
    to the whole photo fitting inside the slot with white padding around
    it (`minZoomFor()`).
-4. The printing controls (printer, Print, Save job, Start new order) are
-   a compact last column; the printer-calibration tools are tucked into
+4. The printing controls (printer, Print, Save / use-a-saved-strip
+   buttons, Start new order) are a compact last column; the printer-calibration tools are tucked into
    a collapsed **Printer calibration** section.
 5. **Print** builds the same sheet, exports it as a PNG, and sends it
-   with an explicit 100mm × 148mm page size. **Save job** stores the
-   whole thing for later (see below). **Start new order** resets the
-   wizard for the next customer.
+   with an explicit 100mm × 148mm page size. Each strip has its own
+   **Save** button (see below). **Start new order** resets the wizard
+   for the next customer.
 
 When a template was accepted via the white- or flat-color fallback, its
 `border.png` already has real cut alpha holes punched in at upload
 time, so it composites exactly like a natively-transparent template —
 no special-casing needed at print time.
 
-## Saving & reloading a job
+## Saving strips, and mixing them
 
-**Save job** (Preview step) stores everything needed to recreate the
-whole sheet later: the layout, the template id(s), the absolute file
-path of each chosen photo (in slot order), each slot's crop
-adjustment, and a small thumbnail. Each saved job is one JSON file
-under Electron's userData folder (`strips/<uuid>.json`) — no photo
-pixels are copied, just paths.
+What gets saved is **one print** — a single 5×14.8cm strip, or a single
+10×14.8cm design — not a whole sheet. So on a two-strip sheet the **left
+and right strips are saved separately**: under *Save* on the Preview step
+there's one button per strip (**Save left strip** / **Save right strip**;
+just **Save strip** for identical copies; **Save print** for a single
+10×14.8cm sheet). Each asks for a name, then stores the strip's template,
+the file path of each of its photos (in slot order), each slot's crop,
+and a thumbnail — one JSON file under Electron's userData folder
+(`strips/<uuid>.json`). No photo pixels are copied, just paths.
 
-Saved jobs appear in the **Saved jobs** gallery on the Layout step;
-click one to jump straight to Preview with everything restored, or use
-the `×` to delete it. Because only paths are stored:
+Using a saved strip:
 
-- The photo files must still exist at the same location on load. If
-  one was moved or deleted, the load is refused with a message.
+- **Saved strips** on the Layout step: click one to print it again as it
+  was — a 5cm strip comes up as **two identical copies** on a sheet, a
+  10cm print as a single sheet. (`useSavedStrip()`)
+- **Under *Use a saved strip*** on the Preview step: **Replace left
+  strip…** / **Replace right strip…** opens a picker of saved strips of
+  the right size and swaps just that side, leaving the other as it was.
+  Replace both sides with different strips and you've mixed two saved
+  strips onto one sheet. (`replaceSide()`; identical copies are split
+  into two separate sides the first time you do this.)
+
+A 5cm strip can't be put on a 10cm print or vice-versa — you get a
+message and nothing changes. Because only paths are stored:
+
+- The photo files must still exist at the same location. If one was
+  moved or deleted, loading is refused with a message and the sheet is
+  left alone.
 - Drag-dropped or pasted images have no path and can't be saved — Save
-  job reports this instead of saving a broken job.
-- If a template was deleted, or the chosen template(s)' total slot
-  count changed since the save, the load is refused.
+  says so instead of saving a broken strip.
+- If the template was deleted, or its slot count changed since the
+  save, loading is refused.
 
-IPC lives in `main.js` (`strips:list` / `strips:save` / `strips:delete`);
-the renderer side is `refreshSavedJobs()` / `loadSavedJob()` in
-`renderer/app.js`.
+Older versions saved a whole sheet at once. Those records still show up
+in the gallery (labelled "whole sheet") and still open; they just
+aren't written any more.
+
+IPC lives in `main.js` (`strips:list` / `strips:save` /
+`strips:delete`); the renderer side is `saveStrip()`, `hydrateStrip()`,
+`showStrips()`, `replaceSide()`, `useSavedStrip()` and
+`refreshSavedJobs()` in `renderer/app.js`.
 
 ## Project structure
 

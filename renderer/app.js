@@ -32,6 +32,11 @@ let maxReachedIndex = 0;
 // ---------------------------------------------------------------------
 // Small shared helpers
 // ---------------------------------------------------------------------
+// Escape text before putting it into innerHTML (names are typed by hand).
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 function fileToImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -207,29 +212,35 @@ document.querySelectorAll('.layout-card').forEach((card) => {
 });
 
 async function refreshSavedJobs() {
-  const jobs = await window.kiosk.strips.list();
+  const saved = await window.kiosk.strips.list();
   const grid = document.getElementById('savedStripGrid');
   grid.innerHTML = '';
 
-  if (jobs.length === 0) {
-    grid.innerHTML = '<p class="muted">No saved jobs yet. Finish a sheet and click "Save job" on the Preview step.</p>';
+  if (saved.length === 0) {
+    grid.innerHTML =
+      '<p class="muted">No saved strips yet. On the Preview step, use "Save" under a strip to keep it here.</p>';
     return;
   }
 
-  for (const job of jobs) {
-    const n = job.photoPaths ? job.photoPaths.length : 0;
+  for (const rec of saved) {
+    const isStrip = rec.kind === 'strip';
+    const n = rec.photoPaths ? rec.photoPaths.length : 0;
+    // Older versions saved a whole sheet at once; those still open.
+    const what = isStrip
+      ? (rec.printSize === 'full' ? '10×14.8 cm print' : '5×14.8 cm strip')
+      : (rec.layout === 'double' ? 'whole sheet (2 prints)' : 'whole sheet (1 print)');
     const card = document.createElement('div');
     card.className = 'card';
     card.innerHTML = `
-      <button class="card-delete" title="Delete this saved job">&times;</button>
-      ${job.thumbnail ? `<img src="${job.thumbnail}" />` : ''}
-      <p>${job.name}<br/><small>${job.layout === 'double' ? '2 prints' : '1 print'} &middot; ${n} photo${n === 1 ? '' : 's'} &middot; ${new Date(job.createdAt).toLocaleDateString()}</small></p>
+      <button class="card-delete" title="Delete this saved item">&times;</button>
+      ${rec.thumbnail ? `<img src="${rec.thumbnail}" />` : ''}
+      <p>${esc(rec.name)}<br/><small>${what} &middot; ${n} photo${n === 1 ? '' : 's'} &middot; ${new Date(rec.createdAt).toLocaleDateString()}</small></p>
     `;
-    card.addEventListener('click', () => loadSavedJob(job));
+    card.addEventListener('click', () => (isStrip ? useSavedStrip(rec) : loadSavedJob(rec)));
     card.querySelector('.card-delete').addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (!confirm(`Delete saved job "${job.name}"?`)) return;
-      await window.kiosk.strips.delete(job.id);
+      if (!confirm(`Delete "${rec.name}"?`)) return;
+      await window.kiosk.strips.delete(rec.id);
       await refreshSavedJobs();
     });
     grid.appendChild(card);
@@ -386,7 +397,8 @@ function makeTemplatePickCard(tpl, isSelected, onPick) {
     <button class="link-btn flip-size-btn">Use as ${tpl.printSize === 'full' ? '5×14.8cm' : '10×14.8cm'}</button>
   `;
   card.addEventListener('click', () => onPick(tpl));
-  card.addEventListener('mouseenter', () => showTemplateHoverPreview(tpl));
+  card.addEventListener('mouseenter', (e) => showTemplateHoverPreview(tpl, e));
+  card.addEventListener('mousemove', placeHoverPreview);
   card.addEventListener('mouseleave', hideTemplateHoverPreview);
   card.querySelector('.card-delete').addEventListener('click', async (e) => {
     e.stopPropagation();
@@ -406,10 +418,38 @@ function makeTemplatePickCard(tpl, isSelected, onPick) {
   return card;
 }
 
-function showTemplateHoverPreview(tpl) {
+// The bigger preview opens beside the cursor and follows it, so you
+// don't have to look across the page for it.
+const hoverCursor = { x: 0, y: 0 };
+
+function placeHoverPreview(e) {
+  if (e) { hoverCursor.x = e.clientX; hoverCursor.y = e.clientY; }
   const pane = document.getElementById('templateHoverPreview');
-  document.getElementById('templateHoverPreviewImg').src = `file://${tpl.borderPath}?t=${Date.now()}`;
+  if (pane.hidden) return;
+
+  const GAP = 24;   // clear of the cursor, so it never sits under it
+  const MARGIN = 8; // keep off the window edge
+  const w = pane.offsetWidth, h = pane.offsetHeight;
+
+  // To the right of the cursor; flip to the left if there isn't room.
+  let left = hoverCursor.x + GAP;
+  if (left + w > window.innerWidth - MARGIN) left = hoverCursor.x - GAP - w;
+  // Vertically centred on the cursor, kept fully on screen.
+  let top = hoverCursor.y - h / 2;
+
+  pane.style.left = Math.max(MARGIN, Math.min(left, window.innerWidth - w - MARGIN)) + 'px';
+  pane.style.top = Math.max(MARGIN, Math.min(top, window.innerHeight - h - MARGIN)) + 'px';
+}
+
+function showTemplateHoverPreview(tpl, e) {
+  const pane = document.getElementById('templateHoverPreview');
+  const img = document.getElementById('templateHoverPreviewImg');
+  if (e) { hoverCursor.x = e.clientX; hoverCursor.y = e.clientY; }
+  // The pane's size depends on the image, so place it again once loaded.
+  img.onload = () => placeHoverPreview();
+  img.src = `file://${tpl.borderPath}?t=${Date.now()}`;
   pane.hidden = false;
+  placeHoverPreview();
 }
 function hideTemplateHoverPreview() {
   document.getElementById('templateHoverPreview').hidden = true;
@@ -1615,6 +1655,7 @@ async function renderPreviewStep() {
         ? 'Two identical 5×14.8 cm strips — adjusting either one adjusts both. Dashed line = where to cut.'
         : 'Left and right 5×14.8 cm strips. Dashed line = where to cut.';
 
+  renderStripButtons();
   wireSheetEditing(previewEditAbort.signal);
   renderSheetPreview();
   updateSheetOverlay();
@@ -1663,46 +1704,224 @@ document.getElementById('printBtn').addEventListener('click', async () => {
   }
 });
 
-// A small JPEG of the assembled sheet, for the "Saved jobs" gallery.
-function sheetThumbnail() {
-  const src = document.getElementById('sheetPreviewCanvas');
+// ---------------------------------------------------------------------
+// Saved strips. What's saved is ONE print — a strip (a 5x14.8cm half) or a
+// single full-sheet design: its template, its photos (file paths, in slot
+// order) and each slot's crop. The left and right strips of a sheet are
+// saved separately, and a saved strip can be loaded into either side — so
+// two different saved strips can be mixed onto one sheet.
+// ---------------------------------------------------------------------
+
+// A small JPEG of one strip's own canvas, for the saved-strips gallery.
+function stripThumbnail(canvas) {
   const t = document.createElement('canvas');
-  const scale = 240 / src.width;
-  t.width = 240;
-  t.height = Math.round(src.height * scale);
-  t.getContext('2d').drawImage(src, 0, 0, t.width, t.height);
+  const scale = 240 / Math.max(canvas.width, canvas.height);
+  t.width = Math.max(1, Math.round(canvas.width * scale));
+  t.height = Math.max(1, Math.round(canvas.height * scale));
+  t.getContext('2d').drawImage(canvas, 0, 0, t.width, t.height);
   return t.toDataURL('image/jpeg', 0.7);
 }
 
-document.getElementById('saveStripBtn').addEventListener('click', async () => {
+// What each Save / Load button is called, for the current layout.
+function stripLabels() {
+  if (wizard.layout === 'single') return ['print'];
+  return wizard.duplicatePhotos ? ['strip'] : ['left strip', 'right strip'];
+}
+
+// (Re)build the per-strip Save buttons and per-side "use a saved strip"
+// buttons for whatever layout is on screen.
+function renderStripButtons() {
+  const save = document.getElementById('saveButtons');
+  const load = document.getElementById('loadButtons');
+  save.innerHTML = '';
+  load.innerHTML = '';
+
+  stripLabels().forEach((label, i) => {
+    const b = document.createElement('button');
+    b.textContent = `Save ${label}`;
+    b.addEventListener('click', () => saveStrip(i));
+    save.appendChild(b);
+  });
+
+  // Identical copies are one strip printed twice; loading into either side
+  // splits them into two independent sides, so both stay offered.
+  const sides = wizard.layout === 'single' ? ['print'] : ['left strip', 'right strip'];
+  sides.forEach((label, i) => {
+    const b = document.createElement('button');
+    b.textContent = wizard.layout === 'single' ? 'Load saved print…' : `Replace ${label}…`;
+    b.addEventListener('click', () => replaceSide(wizard.layout === 'single' ? 'single' : (i === 0 ? 'left' : 'right')));
+    load.appendChild(b);
+  });
+}
+
+async function saveStrip(sideIndex) {
   const status = document.getElementById('printStatus');
-  const paths = wizard.order.map(idx => wizard.photoPool[idx].path);
-  if (paths.some(p => !p)) {
+  const range = sideRanges()[sideIndex];
+  const state = sideStates[sideIndex];
+  if (!range || !state) return;
+
+  const photos = range.template.slots.map((_, si) => wizard.photoPool[wizard.order[range.start + si]]);
+  if (photos.some(p => !p || !p.path)) {
     status.textContent =
-      "Can't save this job — a photo has no file path on disk (drag-dropped or pasted images can't be reloaded).";
+      "Can't save this strip — a photo has no file path on disk (drag-dropped or pasted images can't be reloaded).";
     return;
   }
 
-  const name = await askName('Name this job (e.g. "Booth 3 — Alice & Ben"):');
+  const label = stripLabels()[sideIndex];
+  const name = await askName(`Name this ${label} (e.g. "Alice"):`);
   if (!name) return; // cancelled / blank
-
-  const tpls = activeTemplates();
-  const templateIds = wizard.layout === 'single'
-    ? [tpls[0].id]
-    : [tpls[0].id, tpls[1].id];
 
   const rec = await window.kiosk.strips.save({
     name,
-    layout: wizard.layout,
-    templateIds,
-    duplicatePhotos: wizard.layout === 'double' && wizard.duplicatePhotos,
-    photoPaths: paths,
-    adjustments: wizard.adjustments.map(a => a && { zoom: a.zoom, panX: a.panX, panY: a.panY }),
-    thumbnail: sheetThumbnail()
+    printSize: range.template.printSize,
+    templateId: range.template.id,
+    photoPaths: photos.map(p => p.path),
+    adjustments: range.template.slots.map((_, si) => {
+      const a = wizard.adjustments[range.start + si];
+      return a && { zoom: a.zoom, panX: a.panX, panY: a.panY };
+    }),
+    thumbnail: stripThumbnail(state.canvas)
   });
-  status.textContent = `Saved as "${rec.name}".`;
+  status.textContent = `Saved ${label} as "${rec.name}".`;
   await refreshSavedJobs();
-});
+}
+
+// Rebuild a saved strip into something the wizard can use: its template,
+// its photos loaded from disk, and its crops. Alerts and returns null if
+// the template or any photo is gone.
+async function hydrateStrip(rec) {
+  await refreshTemplatesList();
+  const tpl = templates.find(t => t.id === rec.templateId);
+  if (!tpl) {
+    alert('The template this strip used no longer exists.');
+    return null;
+  }
+  if (rec.photoPaths.length !== tpl.slots.length) {
+    alert(`This strip has ${rec.photoPaths.length} photo(s) but its template has ${tpl.slots.length} slot(s) now.`);
+    return null;
+  }
+  let imgs;
+  try {
+    imgs = await Promise.all(rec.photoPaths.map(p => loadImageFromPath(p)));
+  } catch {
+    alert("One or more of this strip's photo files couldn't be opened — they may have been moved or deleted.");
+    return null;
+  }
+  return {
+    tpl,
+    photos: rec.photoPaths.map((p, i) => ({ img: imgs[i], path: p, name: p.split(/[\\/]/).pop() })),
+    adj: (rec.adjustments || []).map(a => a && { zoom: a.zoom, panX: a.panX, panY: a.panY })
+  };
+}
+
+// The sheet on screen as explicit per-side data, so one side can be swapped
+// without disturbing the other.
+function currentSides() {
+  const sides = sideRanges().map(r => ({
+    tpl: r.template,
+    photos: r.template.slots.map((_, si) => wizard.photoPool[wizard.order[r.start + si]]),
+    adj: r.template.slots.map((_, si) => wizard.adjustments[r.start + si])
+  }));
+  // Identical copies are one strip printed twice — make that two real,
+  // separately editable sides.
+  if (wizard.layout === 'double' && wizard.duplicatePhotos && sides.length === 1) {
+    sides.push({ tpl: sides[0].tpl, photos: [...sides[0].photos], adj: sides[0].adj.map(a => a && { ...a }) });
+  }
+  return sides;
+}
+
+// Put strips on the sheet and go to Preview. `left`/`right` are
+// { tpl, photos, adj }; `duplicate` = print `left` twice.
+async function showStrips(layout, left, right, duplicate) {
+  wizard.layout = layout;
+  wizard.templateLeft = left.tpl;
+  if (layout === 'single') {
+    wizard.mirror = true;
+    wizard.duplicatePhotos = false;
+    wizard.templateRight = null;
+    wizard.photoPool = [...left.photos];
+    wizard.adjustments = [...left.adj];
+  } else if (duplicate) {
+    wizard.mirror = true;
+    wizard.duplicatePhotos = true;
+    wizard.templateRight = null;
+    wizard.photoPool = [...left.photos];
+    wizard.adjustments = [...left.adj];
+  } else {
+    wizard.duplicatePhotos = false;
+    wizard.mirror = left.tpl.id === right.tpl.id;
+    wizard.templateRight = right.tpl;
+    wizard.photoPool = [...left.photos, ...right.photos];
+    wizard.adjustments = [...left.adj, ...right.adj];
+  }
+  wizard.order = wizard.photoPool.map((_, i) => i);
+
+  maxReachedIndex = STEP_ORDER.length - 1;
+  renderLayoutStep();
+  await goToStep('preview');
+}
+
+// A strip fits a 5cm side ('half') or a whole 10cm sheet ('full') — not both.
+function stripFits(rec, target) {
+  const ok = target === 'single' ? rec.printSize === 'full' : rec.printSize === 'half';
+  if (!ok) {
+    alert(target === 'single'
+      ? "That's a 5×14.8 cm strip — it can't be used as a whole 10×14.8 cm print."
+      : "That's a 10×14.8 cm print — it won't fit on a 5 cm strip.");
+  }
+  return ok;
+}
+
+// Swap one side of the sheet on screen for a saved strip.
+async function replaceSide(target) { // 'left' | 'right' | 'single'
+  const rec = await pickSavedStrip(target === 'single' ? 'full' : 'half');
+  if (!rec || !stripFits(rec, target)) return;
+  const strip = await hydrateStrip(rec);
+  if (!strip) return;
+
+  if (target === 'single') return showStrips('single', strip, null, false);
+
+  const sides = currentSides();
+  sides[target === 'left' ? 0 : 1] = strip;
+  return showStrips('double', sides[0], sides[1], false);
+}
+
+// Clicking a saved strip on the Layout step: print it again as it was —
+// a half strip as two identical copies, a full print as a single sheet.
+async function useSavedStrip(rec) {
+  const strip = await hydrateStrip(rec);
+  if (!strip) return;
+  if (rec.printSize === 'full') return showStrips('single', strip, null, false);
+  return showStrips('double', strip, null, true);
+}
+
+// A small dialog listing saved strips of one size; resolves the chosen
+// record, or null if cancelled.
+async function pickSavedStrip(printSize) {
+  const list = (await window.kiosk.strips.list()).filter(r => r.kind === 'strip' && r.printSize === printSize);
+  const dlg = document.getElementById('savedPickDialog');
+  const grid = document.getElementById('savedPickGrid');
+  document.getElementById('savedPickTitle').textContent =
+    printSize === 'half' ? 'Pick a saved 5×14.8 cm strip' : 'Pick a saved 10×14.8 cm print';
+
+  let chosen = null;
+  grid.innerHTML = list.length === 0 ? '<p class="muted">No saved strips of this size yet.</p>' : '';
+  for (const rec of list) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = `
+      ${rec.thumbnail ? `<img src="${rec.thumbnail}" />` : ''}
+      <p>${esc(rec.name)}<br/><small>${new Date(rec.createdAt).toLocaleDateString()}</small></p>
+    `;
+    card.addEventListener('click', () => { chosen = rec; dlg.close('ok'); });
+    grid.appendChild(card);
+  }
+
+  return new Promise((resolve) => {
+    dlg.addEventListener('close', () => resolve(chosen), { once: true });
+    dlg.showModal();
+  });
+}
 
 // ---------------------------------------------------------------------
 // Init

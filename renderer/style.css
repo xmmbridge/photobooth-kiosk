@@ -97,9 +97,9 @@ button:hover:not(:disabled) { background: #4f46e5; }
 }
 
 .hover-preview-pane {
-  position: fixed;
-  top: 90px;
-  right: 24px;
+  position: fixed; /* left/top are set from the cursor position (placeHoverPreview) */
+  left: 0;
+  top: 0;
   max-width: min(360px, 40vw);
   max-height: 70vh;
   background: #1f2937;
@@ -421,7 +421,7 @@ select {
   margin-right: 8px;
 }
 
-#nameDialog, #confirmSlotsDialog, #slotCountDialog {
+#nameDialog, #confirmSlotsDialog, #slotCountDialog, #savedPickDialog {
   border: none;
   border-radius: 10px;
   padding: 20px;
@@ -430,14 +430,14 @@ select {
   min-width: 320px;
   max-width: 90vw;
 }
-#nameDialog::backdrop, #confirmSlotsDialog::backdrop, #slotCountDialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+#nameDialog::backdrop, #confirmSlotsDialog::backdrop, #slotCountDialog::backdrop, #savedPickDialog::backdrop { background: rgba(0, 0, 0, 0.5); }
 #nameDialog input, #slotCountDialog input {
   width: 100%;
   padding: 8px;
   border-radius: 6px;
   border: 1px solid #4b5563;
 }
-#nameDialog menu, #confirmSlotsDialog menu, #slotCountDialog menu {
+#nameDialog menu, #confirmSlotsDialog menu, #slotCountDialog menu, #savedPickDialog menu {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
@@ -495,3 +495,12 @@ select {
   color: #111827;
   font-size: 11px;
 }
+
+/* Per-strip Save / "use a saved strip" buttons in the Preview controls. */
+.strip-actions { margin-top: 6px; }
+.strip-actions > p { margin: 10px 0 0; }
+.strip-actions .control-line { margin: 4px 0; }
+.strip-actions .control-line button { flex: 1 1 100%; text-align: left; }
+
+#savedPickDialog { max-height: 80vh; overflow: auto; min-width: 360px; }
+#savedPickGrid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); margin: 10px 0; }

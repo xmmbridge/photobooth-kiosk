@@ -53,6 +53,18 @@
     </form>
   </dialog>
 
+  <!-- Pick one of the saved strips (used from the Preview step to swap a
+       side). -->
+  <dialog id="savedPickDialog">
+    <form method="dialog">
+      <p id="savedPickTitle">Pick a saved strip</p>
+      <div id="savedPickGrid" class="grid"></div>
+      <menu>
+        <button value="cancel">Cancel</button>
+      </menu>
+    </form>
+  </dialog>
+
   <!-- Bigger preview shown while hovering a template thumbnail. Fixed to
        one screen corner so it's never clipped, regardless of card size
        or position. -->
@@ -89,7 +101,8 @@
         </button>
       </div>
 
-      <h2>Saved jobs</h2>
+      <h2>Saved strips</h2>
+      <p class="muted">Click one to print it again — a 5×14.8 cm strip becomes two identical copies on a sheet. You can swap either side for a different saved strip on the Preview step.</p>
       <div id="savedStripGrid" class="grid"></div>
     </section>
 
@@ -208,7 +221,14 @@
           </div>
           <div class="control-line">
             <button id="printBtn">Print</button>
-            <button id="saveStripBtn">Save job</button>
+          </div>
+          <!-- Built per layout (renderStripButtons): one Save button per
+               strip, and one "use a saved strip" button per side. -->
+          <div class="strip-actions">
+            <p class="muted">Save</p>
+            <div id="saveButtons" class="control-line"></div>
+            <p class="muted">Use a saved strip</p>
+            <div id="loadButtons" class="control-line"></div>
           </div>
           <div class="control-line">
             <button id="newOrderBtn" class="link-btn" type="button">Start new order</button>

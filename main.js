@@ -764,23 +764,25 @@ ipcMain.handle('strips:list', async () => {
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 });
 
-// A saved job = one whole sheet: its layout ('single' | 'double'), the
-// template(s) used (one id, or two for independent left/right strips),
-// and the flattened photos + adjustments across all of that sheet's slots
-// (left strip's slots first, then right's, reading order within each).
-ipcMain.handle('strips:save', async (_event, { id, name, layout, templateIds, duplicatePhotos, photoPaths, adjustments, thumbnail }) => {
-  const recId = safeStripId(id) || crypto.randomUUID();
+// What gets saved is ONE print — a single strip (a 5x14.8cm half) or a
+// single full-sheet design: its template, its photos (file paths, in slot
+// order) and each slot's crop. Left and right strips of a sheet are saved
+// separately, and can be loaded back into either side, or mixed.
+//
+// (Older versions saved a whole sheet at once — `layout` + `templateIds`
+// and no `kind`. Those records still list and load; they're just not
+// written any more.)
+ipcMain.handle('strips:save', async (_event, rec) => {
+  const recId = safeStripId(rec.id) || crypto.randomUUID();
   const record = {
     id: recId,
-    name: name || 'Untitled job',
-    layout: layout === 'double' ? 'double' : 'single',
-    templateIds: Array.isArray(templateIds) ? templateIds.filter(Boolean) : [],
-    // 'double' only: one photo set printed identically on both strips,
-    // so photoPaths/adjustments below hold just that one set's worth.
-    duplicatePhotos: !!duplicatePhotos,
-    photoPaths: Array.isArray(photoPaths) ? photoPaths : [],
-    adjustments: Array.isArray(adjustments) ? adjustments : [],
-    thumbnail: thumbnail || null,
+    kind: 'strip',
+    name: rec.name || 'Untitled strip',
+    printSize: rec.printSize === 'full' ? 'full' : 'half',
+    templateId: rec.templateId,
+    photoPaths: Array.isArray(rec.photoPaths) ? rec.photoPaths : [],
+    adjustments: Array.isArray(rec.adjustments) ? rec.adjustments : [],
+    thumbnail: rec.thumbnail || null,
     createdAt: new Date().toISOString()
   };
   fs.writeFileSync(path.join(STRIPS_DIR, `${recId}.json`), JSON.stringify(record, null, 2));
