@@ -17,6 +17,12 @@ contextBridge.exposeInMainWorld('kiosk', {
     chooseFolder: () => ipcRenderer.invoke('gallery:chooseFolder'),
     list: () => ipcRenderer.invoke('gallery:list')
   },
+  phone: {
+    info: () => ipcRenderer.invoke('phone:info'),
+    clearInbox: () => ipcRenderer.invoke('phone:clearInbox'),
+    // Fired the moment a photo arrives from the phone camera page.
+    onUploaded: (cb) => ipcRenderer.on('gallery:changed', () => cb())
+  },
   strips: {
     list: () => ipcRenderer.invoke('strips:list'),
     save: (record) => ipcRenderer.invoke('strips:save', record),

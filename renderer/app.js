@@ -768,59 +768,131 @@ document.getElementById('clearUploadsBtn').addEventListener('click', () => {
   renderPhotosStep();
 });
 
-// --- Google Drive gallery (inline panel, click a photo to add/remove it
-// from the pool — no separate screen or fixed selection order here; that
-// happens in the Order step). ---
+// --- Photo gallery: photos sent from the phone camera page plus the
+// (optional) Google Drive folder, in one inline panel. Click a photo to
+// add/remove it from the pool — no separate screen or fixed selection
+// order here; that happens in the Order step. ---
 let galleryPhotos = [];
 let galleryPollTimer = null;
+let knownGalleryPaths = null;     // every path seen so far, to spot new arrivals
+const newPhonePaths = new Set();  // phone photos that arrived and haven't been touched yet
+
+function updateGalleryToggleLabel() {
+  const open = !document.getElementById('galleryPanel').hidden;
+  const n = newPhonePaths.size;
+  document.getElementById('toggleGalleryBtn').textContent = open
+    ? 'Hide gallery'
+    : `Phone / Drive gallery${n ? ` (${n} new)` : ''}`;
+}
+
+// The QR code + link that opens the camera page on the phone.
+async function loadPhoneBox() {
+  const qr = document.getElementById('phoneQr');
+  const status = document.getElementById('phoneStatus');
+  const url = document.getElementById('phoneUrl');
+  qr.hidden = true;
+  url.textContent = '';
+  status.textContent = 'Checking phone connection…';
+
+  let info;
+  try {
+    info = await window.kiosk.phone.info();
+  } catch (err) {
+    status.textContent = `Phone camera unavailable: ${err.message}`;
+    return;
+  }
+  if (!info.running) {
+    status.textContent = `The phone camera server isn't running (${info.error}).`;
+    return;
+  }
+  if (info.noNetwork) {
+    status.textContent = 'No network found — connect this PC to Wi-Fi, then reopen the gallery.';
+    return;
+  }
+
+  qr.src = info.qr;
+  qr.hidden = false;
+  status.textContent =
+    'Scan once with the phone camera and open the link (in Chrome: ⋮ → Add to Home screen, so it stays one tap away). ' +
+    'Each photo you take appears below within a couple of seconds. The phone and this PC must be on the same Wi-Fi.';
+  url.textContent = info.url + (info.others.length
+    ? `  —  if that doesn't open, try: ${info.others.map(o => `${o.url} (${o.name})`).join(', ')}`
+    : '');
+}
 
 document.getElementById('toggleGalleryBtn').addEventListener('click', async () => {
   const panel = document.getElementById('galleryPanel');
-  const btn = document.getElementById('toggleGalleryBtn');
   const opening = panel.hidden;
   panel.hidden = !opening;
-  btn.textContent = opening ? 'Hide Drive gallery' : 'Select from Google Drive gallery';
+  updateGalleryToggleLabel();
 
   clearInterval(galleryPollTimer);
   if (!opening) return;
 
+  loadPhoneBox();
   const folder = await window.kiosk.gallery.getFolder();
-  if (!folder) {
-    await chooseGalleryFolder();
-  } else {
-    document.getElementById('galleryFolderLabel').textContent = `Folder: ${folder}`;
-    await refreshGallery();
-  }
+  document.getElementById('galleryFolderLabel').textContent = folder
+    ? `Google Drive folder: ${folder}`
+    : 'No Google Drive folder set (optional) — showing phone photos only.';
+  await refreshGallery();
   galleryPollTimer = setInterval(refreshGallery, 5000);
 });
 
 async function chooseGalleryFolder() {
   const folder = await window.kiosk.gallery.chooseFolder();
   if (!folder) return;
-  document.getElementById('galleryFolderLabel').textContent = `Folder: ${folder}`;
+  document.getElementById('galleryFolderLabel').textContent = `Google Drive folder: ${folder}`;
   await refreshGallery();
 }
 document.getElementById('chooseFolderBtn').addEventListener('click', chooseGalleryFolder);
 document.getElementById('refreshGalleryBtn').addEventListener('click', refreshGallery);
 
+document.getElementById('clearPhoneBtn').addEventListener('click', async () => {
+  if (!confirm(
+    'Delete all photos received from the phone camera?\n\n' +
+    'Photos already added to the current job stay, but saved jobs that use them will no longer reopen.'
+  )) return;
+  await window.kiosk.phone.clearInbox();
+  newPhonePaths.clear();
+  await refreshGallery();
+});
+
 async function refreshGallery() {
   galleryPhotos = await window.kiosk.gallery.list();
-  renderGalleryGrid();
+
+  // Anything from the phone we haven't seen before is "new" (the very first
+  // load only sets the baseline, so photos already there at startup aren't).
+  if (knownGalleryPaths) {
+    for (const p of galleryPhotos) {
+      if (p.source === 'phone' && !knownGalleryPaths.has(p.path)) newPhonePaths.add(p.path);
+    }
+  }
+  knownGalleryPaths = new Set(galleryPhotos.map(p => p.path));
+
+  // Don't build a grid of thumbnails nobody can see.
+  if (!document.getElementById('galleryPanel').hidden) renderGalleryGrid();
+  updateGalleryToggleLabel();
 }
+
+// A photo just arrived from the phone: refresh now, don't wait for the poll.
+window.kiosk.phone.onUploaded(() => { refreshGallery().catch(() => {}); });
 
 function renderGalleryGrid() {
   const grid = document.getElementById('galleryGrid');
   if (galleryPhotos.length === 0) {
-    grid.innerHTML = '<p class="muted">No photos found yet in the synced folder. Ask the customer to upload to Google Drive, then click Refresh.</p>';
+    grid.innerHTML =
+      '<p class="muted">No photos yet. Take one with the phone camera page (scan the QR code above), ' +
+      'or add some to the Google Drive folder and click Refresh.</p>';
     return;
   }
   grid.innerHTML = '';
   for (const photo of galleryPhotos) {
     const inPool = wizard.photoPool.some(p => p.path === photo.path);
+    const isNew = !inPool && newPhonePaths.has(photo.path);
     const card = document.createElement('div');
     card.className = 'card' + (inPool ? ' selected' : '');
     card.innerHTML = `
-      ${inPool ? '<span class="badge">&check;</span>' : ''}
+      ${inPool ? '<span class="badge">&check;</span>' : isNew ? '<span class="badge new">NEW</span>' : ''}
       <img src="file://${photo.path}" />
       <p>${new Date(photo.datetime).toLocaleString()}</p>
     `;
@@ -830,6 +902,9 @@ function renderGalleryGrid() {
 }
 
 async function toggleGalleryPhoto(photo) {
+  newPhonePaths.delete(photo.path); // they've seen it now
+  updateGalleryToggleLabel();
+
   const idx = wizard.photoPool.findIndex(p => p.path === photo.path);
   if (idx >= 0) {
     wizard.photoPool.splice(idx, 1);
@@ -1597,4 +1672,5 @@ document.getElementById('saveStripBtn').addEventListener('click', async () => {
   await refreshSavedJobs();
   renderLayoutStep();
   refreshTabsEnabled();
+  refreshGallery().catch(() => {}); // baseline, so later phone photos are flagged NEW
 })();

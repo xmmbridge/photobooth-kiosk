@@ -135,16 +135,27 @@
       <div class="upload-actions">
         <label for="photoInput" class="btn-like">Add photos&hellip;</label>
         <input type="file" id="photoInput" accept="image/*" multiple hidden />
-        <button id="toggleGalleryBtn">Select from Google Drive gallery</button>
+        <button id="toggleGalleryBtn">Phone / Drive gallery</button>
         <button id="clearUploadsBtn" disabled>Clear all</button>
         <span id="uploadStatus" class="muted"></span>
       </div>
 
       <div id="galleryPanel" hidden>
+        <!-- Scan once with the phone: opens a camera page that sends each
+             photo straight to this PC over Wi-Fi. -->
+        <div class="phone-box">
+          <img id="phoneQr" alt="QR code to open the phone camera page" hidden />
+          <div class="phone-text">
+            <strong>Phone camera</strong>
+            <p id="phoneStatus" class="muted"></p>
+            <p id="phoneUrl" class="muted phone-url"></p>
+          </div>
+        </div>
         <p id="galleryFolderLabel" class="muted"></p>
         <div class="gallery-actions">
-          <button id="chooseFolderBtn">Set / change folder</button>
+          <button id="chooseFolderBtn">Set / change Drive folder</button>
           <button id="refreshGalleryBtn">Refresh</button>
+          <button id="clearPhoneBtn" class="link-btn" type="button">Clear phone photos</button>
         </div>
         <div id="galleryGrid" class="grid"></div>
       </div>

@@ -4,6 +4,8 @@ const fs = require('fs');
 const crypto = require('crypto');
 const Jimp = require('jimp');
 const exifr = require('exifr');
+const QRCode = require('qrcode');
+const { startPhoneServer, lanAddresses } = require('./phone-server');
 
 // All template borders + their computed slot layouts live here.
 const TEMPLATES_DIR = path.join(app.getPath('userData'), 'templates');
@@ -14,7 +16,12 @@ if (!fs.existsSync(TEMPLATES_DIR)) fs.mkdirSync(TEMPLATES_DIR, { recursive: true
 const STRIPS_DIR = path.join(app.getPath('userData'), 'strips');
 if (!fs.existsSync(STRIPS_DIR)) fs.mkdirSync(STRIPS_DIR, { recursive: true });
 
-// Small persisted config (currently just the Google Drive sync folder path).
+// Photos sent from the phone camera page land here; the gallery reads it
+// alongside the (optional) Google Drive folder.
+const INBOX_DIR = path.join(app.getPath('userData'), 'phone-uploads');
+if (!fs.existsSync(INBOX_DIR)) fs.mkdirSync(INBOX_DIR, { recursive: true });
+
+// Small persisted config (Google Drive sync folder path, phone upload token).
 const CONFIG_PATH = path.join(app.getPath('userData'), 'config.json');
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.heic', '.heif']);
 
@@ -71,7 +78,41 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 }
 
-app.whenReady().then(createWindow);
+// --- Phone camera uploads -------------------------------------------------
+// The token is part of the URL the QR code encodes. It's generated once and
+// kept in config.json, so a phone bookmark / home-screen shortcut keeps
+// working across app restarts.
+function getUploadToken() {
+  let token = readConfig().uploadToken;
+  if (!token) {
+    token = crypto.randomBytes(9).toString('base64url');
+    writeConfig({ uploadToken: token });
+  }
+  return token;
+}
+
+let phoneState = { running: false, error: 'Not started' };
+
+async function startPhoneUploads() {
+  try {
+    const token = getUploadToken();
+    const { port } = await startPhoneServer({
+      inboxDir: INBOX_DIR,
+      token,
+      // Tell the window a photo just arrived so the gallery refreshes now,
+      // instead of waiting for its next poll.
+      onUpload: () => mainWindow?.webContents.send('gallery:changed')
+    });
+    phoneState = { running: true, port, token };
+  } catch (err) {
+    phoneState = { running: false, error: err.message };
+  }
+}
+
+app.whenReady().then(() => {
+  createWindow();
+  startPhoneUploads();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
@@ -774,23 +815,24 @@ ipcMain.handle('gallery:chooseFolder', async () => {
   return folder;
 });
 
-// Lists images in the configured folder, newest first. Prefers the
-// photo's own EXIF capture date (DateTimeOriginal) so it reflects when
-// the picture was actually taken; falls back to file modified time for
-// images without EXIF data (screenshots, edited/re-exported files, etc.)
-ipcMain.handle('gallery:list', async () => {
-  const folder = readConfig().galleryFolder;
-  if (!folder || !fs.existsSync(folder)) return [];
+// Lists images from the phone-uploads inbox plus the (optional) Google
+// Drive folder, newest first. Prefers the photo's own EXIF capture date
+// (DateTimeOriginal) so it reflects when the picture was actually taken;
+// falls back to file modified time for images without EXIF data
+// (screenshots, edited/re-exported files, phone shots that were resized
+// before upload, etc.)
+//
+// The gallery is re-listed on every phone upload and every few seconds
+// while open, so EXIF results are cached per file (path + mtime + size).
+const exifCache = new Map();
 
-  const entries = fs.readdirSync(folder, { withFileTypes: true })
-    .filter(e => e.isFile() && IMAGE_EXTENSIONS.has(path.extname(e.name).toLowerCase()));
-
-  const photos = await Promise.all(entries.map(async (entry) => {
-    const fullPath = path.join(folder, entry.name);
-    const stat = fs.statSync(fullPath);
+async function photoInfo(fullPath, name, source) {
+  const stat = fs.statSync(fullPath);
+  const key = `${fullPath}|${stat.mtimeMs}|${stat.size}`;
+  let info = exifCache.get(key);
+  if (!info) {
     let datetime = stat.mtime;
     let dateSource = 'file modified time';
-
     try {
       const exifDate = await exifr.parse(fullPath, ['DateTimeOriginal', 'CreateDate']);
       if (exifDate?.DateTimeOriginal) {
@@ -803,17 +845,72 @@ ipcMain.handle('gallery:list', async () => {
     } catch {
       // Not all formats/files have parseable EXIF — mtime fallback is fine.
     }
+    info = { datetime: datetime.toISOString(), dateSource };
+    exifCache.set(key, info);
+  }
+  return { path: fullPath, filename: name, source, ...info };
+}
 
-    return {
-      path: fullPath,
-      filename: entry.name,
-      datetime: datetime.toISOString(),
-      dateSource
-    };
-  }));
+ipcMain.handle('gallery:list', async () => {
+  const folders = [{ dir: INBOX_DIR, source: 'phone' }];
+  const drive = readConfig().galleryFolder;
+  if (drive && fs.existsSync(drive) && path.resolve(drive) !== path.resolve(INBOX_DIR)) {
+    folders.push({ dir: drive, source: 'drive' });
+  }
 
-  photos.sort((a, b) => new Date(b.datetime) - new Date(a.datetime));
-  return photos;
+  const photos = [];
+  for (const { dir, source } of folders) {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue; // folder vanished (e.g. unplugged drive) — just skip it
+    }
+    const images = entries.filter(
+      e => e.isFile() && IMAGE_EXTENSIONS.has(path.extname(e.name).toLowerCase())
+    );
+    photos.push(...await Promise.all(
+      images.map(e => photoInfo(path.join(dir, e.name), e.name, source).catch(() => null))
+    ));
+  }
+
+  const listed = photos.filter(Boolean);
+  listed.sort((a, b) => new Date(b.datetime) - new Date(a.datetime));
+  return listed;
+});
+
+/* ---------------------------------------------------------------------- *
+ *  Phone camera: connection info for the QR code, and housekeeping.
+ * ---------------------------------------------------------------------- */
+ipcMain.handle('phone:info', async () => {
+  if (!phoneState.running) return { running: false, error: phoneState.error };
+
+  const addrs = lanAddresses();
+  if (addrs.length === 0) return { running: true, noNetwork: true };
+
+  const urls = addrs.map(a => `http://${a.address}:${phoneState.port}/u/${phoneState.token}/`);
+  const qr = await QRCode.toDataURL(urls[0], { margin: 1, width: 260 });
+  return {
+    running: true,
+    url: urls[0],
+    qr,
+    // Every other address this PC has — if the first guess is the wrong
+    // network, the operator can see the alternatives.
+    others: addrs.slice(1).map((a, i) => ({ name: a.name, url: urls[i + 1] }))
+  };
+});
+
+// Photos sent from the phone pile up; this empties the inbox. (Does not
+// touch the Google Drive folder.)
+ipcMain.handle('phone:clearInbox', async () => {
+  let removed = 0;
+  for (const name of fs.readdirSync(INBOX_DIR)) {
+    try {
+      fs.unlinkSync(path.join(INBOX_DIR, name));
+      removed++;
+    } catch { /* in use / already gone */ }
+  }
+  return removed;
 });
 
 /* ---------------------------------------------------------------------- *

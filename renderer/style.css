@@ -462,3 +462,35 @@ select {
 }
 .confirm-slots-toolbar #confirmSlotsCount { margin: 0; }
 .confirm-slots-toolbar .link-btn { white-space: nowrap; }
+
+/* Phone camera connection box (QR code) at the top of the gallery panel. */
+.phone-box {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: #1f2937;
+  border-radius: 10px;
+  padding: 12px;
+  margin: 12px 0;
+}
+.phone-box img {
+  width: 150px;
+  height: 150px;
+  flex: 0 0 auto;
+  border-radius: 6px;
+  background: #fff;
+}
+.phone-text { min-width: 0; }
+.phone-text p { margin: 6px 0 0; }
+.phone-url { word-break: break-all; user-select: text; }
+
+/* "NEW" tag on a photo that just arrived from the phone. */
+.badge.new {
+  width: auto;
+  height: auto;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #f59e0b;
+  color: #111827;
+  font-size: 11px;
+}

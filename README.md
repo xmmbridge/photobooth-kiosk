@@ -204,6 +204,54 @@ as …"** link to flip it.
   590×1748px (300 DPI). Off-ratio templates still work — they're
   contain-fitted into the sheet with white margins.
 
+## Phone camera (photos sent straight to the booth over Wi-Fi)
+
+Use a phone as the booth camera: every photo it takes shows up in the
+gallery within a second or two — no cloud, no accounts, no internet.
+
+1. On the **Photos** step, click **Phone / Drive gallery**. A QR code
+   appears at the top of the panel.
+2. Scan it **once** with the phone's camera app and open the link. In
+   Chrome, use ⋮ → **Add to Home screen** so it's a one-tap icon later.
+3. Tap **Take photo** (front/back camera toggle below it). The photo
+   uploads automatically; a row shows "Sent ✓", or "Failed — tap to
+   retry" if the Wi-Fi hiccupped. Photos appear in the gallery marked
+   **NEW** (the gallery button also shows a "(N new)" count while it's
+   closed). Click one to add it to the job, like any gallery photo.
+
+Notes:
+- The phone and the PC must be on the **same Wi-Fi network**.
+- **Scanning is a one-time step.** The link contains a secret token kept
+  in `config.json` (it survives app restarts), so the home-screen
+  shortcut keeps working. It breaks only if the PC's IP address changes
+  (routers can reassign it after a restart) — either rescan the QR code,
+  or give the PC a fixed IP in the router ("DHCP reservation").
+- First run, Windows asks whether to allow the app on the network —
+  choose **Private networks**. If the phone can't open the link, check
+  that prompt wasn't dismissed (Windows Defender Firewall → allow
+  XMMBRIDGE Photobooth / Electron on Private).
+- If the PC has several network adapters (VirtualBox, WSL, VPN…) the QR
+  uses the Wi-Fi one; the other candidate addresses are listed under the
+  QR code in case the first guess is the wrong network.
+- Set the phone's screen timeout to something long — a web page can't
+  keep an Android screen awake over plain http.
+- Phone shots are shrunk to at most 2400 px on the long side before
+  sending (the print is only ~1181×1748, so nothing is lost, and
+  uploads are much faster). Photos are saved to `phone-uploads/` in the
+  app's data folder; **Clear phone photos** in the gallery panel empties
+  it. Photos already added to the current job stay, but saved jobs that
+  used them can't reopen afterwards.
+- Upload-only by design: the phone page can't list or download anything,
+  every route requires the token, only images up to 25 MB are accepted,
+  and the file name is always chosen by the app (never the phone).
+- The Google Drive folder below still works alongside this; the gallery
+  shows both together, newest first.
+
+The server is `phone-server.js` (plain Node `http`, no Electron
+dependency); `main.js` starts it with the app, and the gallery refreshes
+the moment an upload lands (`gallery:changed`) instead of waiting for
+the 5-second poll.
+
 ## Gallery / Google Drive folder setup
 
 This app doesn't talk to Google Drive's API directly — it reads whatever
@@ -217,9 +265,10 @@ OAuth, no internet dependency at kiosk runtime, just a folder on disk.
 2. Pick (or create) a dedicated folder for this — e.g. a shared Drive
    folder named "Photobooth uploads" — and make sure it's set to sync
    locally (not "online only").
-3. On the **Photos** step, click **"Select from Google Drive gallery"**
-   the first time — it'll prompt you to choose that local synced
-   folder. This is saved and reused after that ("Set / change folder").
+3. On the **Photos** step, click **Phone / Drive gallery**, then
+   **Set / change Drive folder** and choose that local synced folder.
+   This is saved and reused after that. (The Drive folder is optional —
+   the gallery works with phone uploads alone.)
 4. Customers upload photos into that Drive folder from their phone (the
    Drive mobile app, or a shared upload link). The gallery panel
    auto-refreshes every 5 seconds while open, so new uploads show up
@@ -312,6 +361,8 @@ the renderer side is `refreshSavedJobs()` / `loadSavedJob()` in
 main.js              Electron main process: window/kiosk mode, slot
                       detection, print-size classification, template +
                       saved-job storage, gallery listing, printer IPC
+phone-server.js       Phone camera upload server + the phone's camera
+                      page (plain Node http; testable without Electron)
 preload.js            Safe IPC bridge exposed to the renderer as
                       window.kiosk
 renderer/
