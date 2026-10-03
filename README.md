@@ -186,7 +186,10 @@ your design tool, or re-upload with a different slot count.
 **Which sheet size is a template for?** Every template is tagged
 `printSize: 'full'` (10×14.8cm) or `'half'` (5×14.8cm), guessed from
 the uploaded PNG's aspect ratio (`classifyPrintSize()` in `main.js`).
-Hovering a template shows a larger preview next to the cursor (it
+To remove a template, click the **×** in its top-right corner on the
+Templates step (it asks first, and warns if saved strips use it —
+those can't reopen once their template is gone). Hovering a template
+shows a larger preview next to the cursor (it
 follows the mouse and flips sides near a window edge). The Templates
 step only offers templates matching the layout the
 operator chose. If the guess is wrong, each template card has a **"Use

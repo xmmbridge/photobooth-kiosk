@@ -402,7 +402,16 @@ function makeTemplatePickCard(tpl, isSelected, onPick) {
   card.addEventListener('mouseleave', hideTemplateHoverPreview);
   card.querySelector('.card-delete').addEventListener('click', async (e) => {
     e.stopPropagation();
-    if (!confirm(`Delete this template? This can't be undone.`)) return;
+    // Saved strips remember their template; deleting it means they can't
+    // reopen, so say so before it happens.
+    const using = (await window.kiosk.strips.list())
+      .filter(r => r.templateId === tpl.id || (r.templateIds || []).includes(tpl.id)).length;
+    const warn = using
+      ? `
+
+${using} saved strip${using === 1 ? '' : 's'} use${using === 1 ? 's' : ''} this template and won't open any more.`
+      : '';
+    if (!confirm(`Delete this template? This can't be undone.${warn}`)) return;
     await window.kiosk.templates.delete(tpl.id);
     if (wizard.templateLeft && wizard.templateLeft.id === tpl.id) wizard.templateLeft = null;
     if (wizard.templateRight && wizard.templateRight.id === tpl.id) wizard.templateRight = null;

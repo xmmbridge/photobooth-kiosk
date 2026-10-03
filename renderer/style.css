@@ -191,6 +191,10 @@ main { padding: 24px; }
 }
 .card:hover .card-delete { opacity: 1; }
 .card-delete:hover:not(:disabled) { background: #dc2626; }
+/* Template cards aren't .card, so the hover-reveal above never applied to
+   them and their delete button was permanently invisible. Always show it
+   (hover-only is also unusable on a touchscreen). */
+.template-card .card-delete { opacity: 1; background: rgba(17, 24, 39, 0.85); }
 .card img { width: 100%; height: 140px; object-fit: contain; background: #374151; border-radius: 6px; }
 .card p { margin: 8px 0 0; font-size: 13px; }
 
