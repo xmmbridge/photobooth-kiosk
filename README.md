@@ -308,19 +308,26 @@ photo's crop.
 
 1. Each photo starts scaled and center-cropped to fill its slot's
    bounding box (no stretching/distortion) — `defaultAdjust()`.
-2. Preview shows one canvas per side (one for a single sheet, two for
-   double) built by `renderSideStrip()`: photos into their slots, the
+2. Each strip (one for a single sheet, two for double) is composited
+   off-screen by `renderSideStrip()`: photos into their slots, the
    border PNG drawn on top (its holes reveal the photos, its opaque
    design masks the edges).
-3. On each canvas: **drag** a photo to reposition it, **scroll** to
-   zoom, **double-click** a slot (or **Reset all**) to reset it.
-   Zooming out stops at "photo covers the slot" by default but can go
-   further, down to the whole photo fitting inside the slot with white
-   padding around it (`minZoomFor()`).
-4. A live **Sheet preview** shows the assembled 10×14.8cm sheet — for
-   the double layout, each side canvas is contain-fitted into its half
-   with a dashed cut guide (screen only, never printed) —
-   `buildSheetCanvas()`.
+3. The **sheet preview** is the one thing shown on the Preview step —
+   the assembled 10×14.8cm sheet, with each strip contain-fitted into
+   its half and a dashed cut guide (screen only, never printed;
+   `buildSheetCanvas()`). It is also the editor, so there's no
+   separate per-strip canvas duplicating it: **drag** a photo right on
+   the sheet to reposition it, **scroll** to zoom, **double-click** a
+   photo (or **Reset all**) to reset it. A click is mapped back into
+   whichever strip it landed in (`sheetPlacements()`,
+   `slotUnderPointer()`). With **identical copies**, both halves are
+   the same strip, so adjusting either one adjusts both. Zooming out
+   stops at "photo covers the slot" by default but can go further, down
+   to the whole photo fitting inside the slot with white padding around
+   it (`minZoomFor()`).
+4. The printing controls (printer, Print, Save job, Start new order) are
+   a compact last column; the printer-calibration tools are tucked into
+   a collapsed **Printer calibration** section.
 5. **Print** builds the same sheet, exports it as a PNG, and sends it
    with an explicit 100mm × 148mm page size. **Save job** stores the
    whole thing for later (see below). **Start new order** resets the

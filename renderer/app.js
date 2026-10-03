@@ -1094,11 +1094,10 @@ let sideStates = []; // one per active side, rebuilt each time Preview is (re)en
 
 async function buildSideState(range) {
   const canvas = document.createElement('canvas');
-  canvas.className = 'side-canvas';
   canvas.width = range.template.canvasWidth;
   canvas.height = range.template.canvasHeight;
   const borderImg = await loadImageFromPath(range.template.borderPath, true);
-  return { range, tpl: range.template, canvas, borderImg, overlay: null, activeSlotIndex: null };
+  return { range, tpl: range.template, canvas, borderImg, activeSlotIndex: null };
 }
 
 function renderSideStrip(state) {
@@ -1122,28 +1121,49 @@ function renderSideStrip(state) {
   if (state.tpl.opaqueBorder) drawPhotos();
 }
 
-function updateSideOverlay(state) {
-  const overlay = state.overlay;
-  overlay.innerHTML = '';
-  state.tpl.slots.forEach((slot, i) => {
-    const hi = document.createElement('div');
-    hi.className = 'slot-hi' + (i === state.activeSlotIndex ? ' active' : '');
-    hi.style.left = (slot.x / state.canvas.width * 100) + '%';
-    hi.style.top = (slot.y / state.canvas.height * 100) + '%';
-    hi.style.width = (slot.w / state.canvas.width * 100) + '%';
-    hi.style.height = (slot.h / state.canvas.height * 100) + '%';
-    overlay.appendChild(hi);
+// -- Editing happens on the sheet preview itself --------------------------
+// The sheet preview is what will print, so it is also where photos get
+// adjusted: a click lands on the sheet, is mapped back into the strip it
+// hit, and from there it's the usual per-slot drag / zoom / reset. (A
+// separate canvas per strip would only show the same picture twice.)
+
+// Where each strip copy sits on the sheet, in sheet pixels. Mirrors what
+// buildSheetCanvas draws — both go through containRect(), so they can't
+// drift apart. For "identical copies" the same strip appears twice.
+function sheetPlacements() {
+  const [left, right] = sheetCanvasArgs();
+  const place = (canvas, x, y, w, h) => ({
+    state: sideStates.find(s => s.canvas === canvas),
+    ...containRect(canvas, x, y, w, h)
   });
+  let placements = [];
+  if (left && right) {
+    const cellW = SHEET_W_PX / 2;
+    placements = [place(left, 0, 0, cellW, SHEET_H_PX), place(right, cellW, 0, cellW, SHEET_H_PX)];
+  } else if (left || right) {
+    placements = [place(left || right, 0, 0, SHEET_W_PX, SHEET_H_PX)];
+  }
+  return placements.filter(pl => pl.state);
 }
 
-// -- Mouse editing: drag to pan, wheel to zoom, double-click to reset ----
-function canvasPointOn(canvas, e) {
-  const r = canvas.getBoundingClientRect();
-  return {
-    x: (e.clientX - r.left) / r.width * canvas.width,
-    y: (e.clientY - r.top) / r.height * canvas.height
-  };
+// Outline every photo slot over the sheet (the one being edited is solid).
+function updateSheetOverlay() {
+  const overlay = document.getElementById('sheetOverlay');
+  overlay.innerHTML = '';
+  for (const pl of sheetPlacements()) {
+    const k = pl.w / pl.state.canvas.width; // strip pixels -> sheet pixels
+    pl.state.tpl.slots.forEach((slot, i) => {
+      const hi = document.createElement('div');
+      hi.className = 'slot-hi' + (i === pl.state.activeSlotIndex ? ' active' : '');
+      hi.style.left = ((pl.x + slot.x * k) / SHEET_W_PX * 100) + '%';
+      hi.style.top = ((pl.y + slot.y * k) / SHEET_H_PX * 100) + '%';
+      hi.style.width = (slot.w * k / SHEET_W_PX * 100) + '%';
+      hi.style.height = (slot.h * k / SHEET_H_PX * 100) + '%';
+      overlay.appendChild(hi);
+    });
+  }
 }
+
 function slotAtOn(tpl, x, y) {
   for (let i = tpl.slots.length - 1; i >= 0; i--) {
     const s = tpl.slots[i];
@@ -1154,30 +1174,64 @@ function slotAtOn(tpl, x, y) {
 
 function afterSideAdjust(state) {
   renderSideStrip(state);
-  updateSideOverlay(state);
   renderSheetPreview();
+  updateSheetOverlay();
 }
 
-function wireSideEditing(state) {
-  const canvas = state.canvas;
-  let drag = null; // { index, x, y }
+// The mouse position in sheet pixels, and — given a placement — in that
+// strip's own pixels.
+function sheetPointer(e, placement) {
+  const canvas = document.getElementById('sheetPreviewCanvas');
+  const r = canvas.getBoundingClientRect();
+  const sx = (e.clientX - r.left) / r.width * canvas.width;
+  const sy = (e.clientY - r.top) / r.height * canvas.height;
+  if (!placement) return { sx, sy };
+  return {
+    sx, sy,
+    x: (sx - placement.x) / placement.w * placement.state.canvas.width,
+    y: (sy - placement.y) / placement.h * placement.state.canvas.height
+  };
+}
+
+// The photo slot under the cursor, if any: { placement, index, x, y } with
+// x/y in that strip's pixels.
+function slotUnderPointer(e) {
+  const { sx, sy } = sheetPointer(e);
+  for (const pl of sheetPlacements()) {
+    if (sx < pl.x || sx > pl.x + pl.w || sy < pl.y || sy > pl.y + pl.h) continue;
+    const p = sheetPointer(e, pl);
+    const index = slotAtOn(pl.state.tpl, p.x, p.y);
+    if (index >= 0) return { placement: pl, index, x: p.x, y: p.y };
+  }
+  return null;
+}
+
+function setActiveSlot(state, index) {
+  for (const s of sideStates) s.activeSlotIndex = null;
+  if (state) state.activeSlotIndex = index;
+}
+
+// Every listener here is tied to `signal`: the sheet canvas is one
+// long-lived element and the move/up listeners live on `window`, so they'd
+// otherwise pile up each time the Preview step is rendered.
+function wireSheetEditing(signal) {
+  const canvas = document.getElementById('sheetPreviewCanvas');
+  let drag = null; // { placement, index, x, y } — x/y = last pointer position, strip pixels
 
   canvas.addEventListener('mousedown', (e) => {
-    const p = canvasPointOn(canvas, e);
-    const i = slotAtOn(state.tpl, p.x, p.y);
-    state.activeSlotIndex = i >= 0 ? i : null;
-    if (i >= 0) {
-      drag = { index: i, x: p.x, y: p.y };
-      canvas.classList.add('dragging');
+    const hit = slotUnderPointer(e);
+    setActiveSlot(hit ? hit.placement.state : null, hit ? hit.index : null);
+    updateSheetOverlay();
+    if (hit) {
+      drag = hit;
+      canvas.style.cursor = 'grabbing';
     }
-    updateSideOverlay(state);
-  });
-
-  const signal = previewEditAbort.signal;
+  }, { signal });
 
   window.addEventListener('mousemove', (e) => {
     if (!drag) return;
-    const p = canvasPointOn(canvas, e);
+    const { state } = drag.placement;
+    const p = sheetPointer(e, drag.placement);
     const slot = state.tpl.slots[drag.index];
     const gi = state.range.start + drag.index;
     const photo = wizard.photoPool[wizard.order[gi]];
@@ -1191,51 +1245,67 @@ function wireSideEditing(state) {
   }, { signal });
 
   window.addEventListener('mouseup', () => {
+    if (!drag) return;
     drag = null;
-    canvas.classList.remove('dragging');
+    canvas.style.cursor = 'grab';
   }, { signal });
 
   canvas.addEventListener('wheel', (e) => {
-    const p = canvasPointOn(canvas, e);
-    const i = slotAtOn(state.tpl, p.x, p.y);
-    if (i < 0) return;
+    const hit = slotUnderPointer(e);
+    if (!hit) return;
     e.preventDefault();
 
-    const slot = state.tpl.slots[i];
-    const gi = state.range.start + i;
+    const { state } = hit.placement;
+    const slot = state.tpl.slots[hit.index];
+    const gi = state.range.start + hit.index;
     const photo = wizard.photoPool[wizard.order[gi]];
     const adj = wizard.adjustments[gi] || (wizard.adjustments[gi] = defaultAdjust(photo.img, slot));
     const cs = coverScale(photo.img, slot);
     const oldZoom = adj.zoom;
     adj.zoom = Math.min(5, Math.max(minZoomFor(photo.img, slot), adj.zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1)));
 
-    const imgX = (p.x - slot.x - adj.panX) / (cs * oldZoom);
-    const imgY = (p.y - slot.y - adj.panY) / (cs * oldZoom);
-    adj.panX = p.x - slot.x - imgX * cs * adj.zoom;
-    adj.panY = p.y - slot.y - imgY * cs * adj.zoom;
+    // Keep the point under the cursor fixed while zooming.
+    const imgX = (hit.x - slot.x - adj.panX) / (cs * oldZoom);
+    const imgY = (hit.y - slot.y - adj.panY) / (cs * oldZoom);
+    adj.panX = hit.x - slot.x - imgX * cs * adj.zoom;
+    adj.panY = hit.y - slot.y - imgY * cs * adj.zoom;
 
     clampAdjust(photo.img, slot, adj);
-    state.activeSlotIndex = i;
+    setActiveSlot(state, hit.index);
     afterSideAdjust(state);
-  }, { passive: false });
+  }, { passive: false, signal });
 
   canvas.addEventListener('dblclick', (e) => {
-    const p = canvasPointOn(canvas, e);
-    const i = slotAtOn(state.tpl, p.x, p.y);
-    if (i < 0) return;
-    const gi = state.range.start + i;
+    const hit = slotUnderPointer(e);
+    if (!hit) return;
+    const { state } = hit.placement;
+    const gi = state.range.start + hit.index;
     const photo = wizard.photoPool[wizard.order[gi]];
-    wizard.adjustments[gi] = defaultAdjust(photo.img, state.tpl.slots[i]);
-    state.activeSlotIndex = i;
+    wizard.adjustments[gi] = defaultAdjust(photo.img, state.tpl.slots[hit.index]);
+    setActiveSlot(state, hit.index);
     afterSideAdjust(state);
-  });
+  }, { signal });
 
   canvas.addEventListener('mousemove', (e) => {
     if (drag) return;
-    const p = canvasPointOn(canvas, e);
-    canvas.style.cursor = slotAtOn(state.tpl, p.x, p.y) >= 0 ? 'grab' : 'default';
-  });
+    canvas.style.cursor = slotUnderPointer(e) ? 'grab' : 'default';
+  }, { signal });
 }
+
+// Put every photo back to its default crop.
+document.getElementById('resetAdjustBtn').addEventListener('click', () => {
+  for (const state of sideStates) {
+    state.tpl.slots.forEach((slot, si) => {
+      const gi = state.range.start + si;
+      const photo = wizard.photoPool[wizard.order[gi]];
+      if (photo) wizard.adjustments[gi] = defaultAdjust(photo.img, slot);
+    });
+    state.activeSlotIndex = null;
+    renderSideStrip(state);
+  }
+  renderSheetPreview();
+  updateSheetOverlay();
+});
 
 // -- Sheet assembly (10cm x 14.8cm, one or two prints side by side) ------
 const SHEET_DPI = 300;                  // SELPHY CP1500 native print resolution
@@ -1246,11 +1316,17 @@ const SHEET_H_PX = Math.round(SHEET_HEIGHT_MM / 25.4 * SHEET_DPI);  // ~1748
 // Millimetres in microns (1 mm = 1000 µm), for Electron's print pageSize.
 const SHEET_PAGE_SIZE = { widthMicrons: SHEET_WIDTH_MM * 1000, heightMicrons: SHEET_HEIGHT_MM * 1000 };
 
-function drawContain(ctx, src, x, y, w, h) {
+// The rectangle a contain-fit (centred, aspect preserved) lands in.
+function containRect(src, x, y, w, h) {
   const scale = Math.min(w / src.width, h / src.height);
   const dw = src.width * scale;
   const dh = src.height * scale;
-  ctx.drawImage(src, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+  return { x: x + (w - dw) / 2, y: y + (h - dh) / 2, w: dw, h: dh };
+}
+
+function drawContain(ctx, src, x, y, w, h) {
+  const r = containRect(src, x, y, w, h);
+  ctx.drawImage(src, r.x, r.y, r.w, r.h);
 }
 
 // Builds the full sheet canvas. `right` is null for a single 10x14.8cm
@@ -1515,69 +1591,33 @@ function renderSheetPreview() {
   view.getContext('2d').drawImage(sheet, 0, 0);
 }
 
-// wireSideEditing() attaches move/up listeners to `window` (so a drag
-// keeps tracking even if the cursor leaves the canvas). renderPreviewStep
-// can run many times in a session (switching template, revisiting the
-// step, ...), each time with fresh canvases, so those listeners must be
-// torn down each time too or they'd pile up and fire against stale sides.
+// Listeners for dragging/zooming on the sheet preview (see wireSheetEditing).
+// renderPreviewStep can run many times in a session (switching template,
+// revisiting the step, ...); aborting the previous controller drops the
+// old listeners so they don't pile up and fire against stale strips.
 let previewEditAbort = null;
 
 async function renderPreviewStep() {
   previewEditAbort?.abort();
   previewEditAbort = new AbortController();
 
-  const container = document.getElementById('stripCanvases');
-  container.innerHTML = '';
   sideStates = [];
-
-  const ranges = sideRanges();
-  for (const range of ranges) {
+  for (const range of sideRanges()) {
     const state = await buildSideState(range);
     sideStates.push(state);
-
-    const editor = document.createElement('div');
-    editor.className = 'side-editor';
-    if (wizard.layout === 'double') {
-      const label = document.createElement('p');
-      label.className = 'muted side-label';
-      label.textContent = wizard.duplicatePhotos
-        ? 'Both prints (identical)'
-        : (sideStates.length === 1 ? 'Left strip' : 'Right strip');
-      editor.appendChild(label);
-    }
-
-    const wrap = document.createElement('div');
-    wrap.className = 'canvas-wrap';
-    const overlay = document.createElement('div');
-    overlay.className = 'slot-overlay';
-    wrap.appendChild(state.canvas);
-    wrap.appendChild(overlay);
-    editor.appendChild(wrap);
-    state.overlay = overlay;
-
-    const hint = document.createElement('p');
-    hint.className = 'muted';
-    hint.innerHTML =
-      'Drag a photo to reposition it &middot; scroll to zoom &middot; ' +
-      'double-click a slot to reset <button class="link-btn reset-side-btn">Reset all</button>';
-    hint.querySelector('.reset-side-btn').addEventListener('click', () => {
-      state.tpl.slots.forEach((slot, si) => {
-        const gi = state.range.start + si;
-        const photo = wizard.photoPool[wizard.order[gi]];
-        wizard.adjustments[gi] = defaultAdjust(photo.img, slot);
-      });
-      afterSideAdjust(state);
-    });
-    editor.appendChild(hint);
-
-    container.appendChild(editor);
-
     renderSideStrip(state);
-    wireSideEditing(state);
-    updateSideOverlay(state);
   }
 
+  document.getElementById('sheetCaption').textContent =
+    wizard.layout === 'single'
+      ? 'One 10×14.8 cm print.'
+      : wizard.duplicatePhotos
+        ? 'Two identical 5×14.8 cm strips — adjusting either one adjusts both. Dashed line = where to cut.'
+        : 'Left and right 5×14.8 cm strips. Dashed line = where to cut.';
+
+  wireSheetEditing(previewEditAbort.signal);
   renderSheetPreview();
+  updateSheetOverlay();
   await populatePrinters();
 }
 

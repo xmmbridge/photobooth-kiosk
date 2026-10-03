@@ -185,43 +185,55 @@
     <section id="step-preview" class="step">
       <h2>Preview</h2>
       <div class="preview-row">
-        <div class="pv-col pv-canvas">
-          <div id="stripCanvases"></div>
+        <!-- The sheet is both the preview and the editor: drag / scroll /
+             double-click a photo right on it. -->
+        <div class="pv-col pv-sheet">
+          <div class="canvas-wrap">
+            <canvas id="sheetPreviewCanvas"></canvas>
+            <div id="sheetOverlay" class="slot-overlay"></div>
+          </div>
+          <p class="muted" id="sheetCaption"></p>
+          <p class="muted">
+            Drag a photo to reposition it &middot; scroll to zoom &middot;
+            double-click a photo to reset it
+            <button id="resetAdjustBtn" class="link-btn" type="button">Reset all</button>
+          </p>
         </div>
+
+        <!-- Printing controls: compact, last column. -->
         <div class="pv-col pv-controls">
           <div class="control-line">
-            <label for="printerSelect">Printer:</label>
+            <label for="printerSelect">Printer</label>
             <select id="printerSelect"></select>
           </div>
           <div class="control-line">
             <button id="printBtn">Print</button>
             <button id="saveStripBtn">Save job</button>
-            <button id="newOrderBtn">Start new order</button>
           </div>
-          <p id="printStatus"></p>
-          <p class="control-line">
-            <button id="printCalibrationBtn" class="link-btn" type="button">Print calibration sheet</button>
-          </p>
-          <p class="muted">
-            One-time printer check: prints a ruler/crosshair pattern through the
-            same pipeline as a real job, so you can measure any offset or
-            cropping against the printed paper.
-          </p>
           <div class="control-line">
-            <label for="printMeasuredInput">Measured &ldquo;20 mm&rdquo; mark (mm):</label>
-            <input type="number" id="printMeasuredInput" min="20" max="26" step="0.1" value="20" />
+            <button id="newOrderBtn" class="link-btn" type="button">Start new order</button>
           </div>
-          <p class="muted">
-            Measure a 20&nbsp;mm interval on the printed calibration sheet with a
-            ruler and enter it here. If it reads longer than 20, the printer is
-            enlarging the image and cropping the edges; the app then pre-shrinks
-            every print by that factor to cancel it out. Leave at 20 for no
-            correction.
-          </p>
-        </div>
-        <div class="pv-col pv-sheet">
-          <p class="muted">Sheet preview</p>
-          <canvas id="sheetPreviewCanvas"></canvas>
+          <p id="printStatus" class="muted"></p>
+
+          <details class="calibration">
+            <summary>Printer calibration</summary>
+            <p class="muted">
+              One-time check: prints a ruler/crosshair pattern through the same
+              pipeline as a real job, so you can measure any offset or cropping
+              against the printed paper.
+            </p>
+            <button id="printCalibrationBtn" class="link-btn" type="button">Print calibration sheet</button>
+            <div class="control-line">
+              <label for="printMeasuredInput">Measured &ldquo;20 mm&rdquo; mark (mm)</label>
+              <input type="number" id="printMeasuredInput" min="20" max="26" step="0.1" value="20" />
+            </div>
+            <p class="muted">
+              Measure a 20&nbsp;mm interval on the printed calibration sheet and
+              enter it here. If it reads longer than 20, the printer is enlarging
+              the image and cropping the edges; every print is then pre-shrunk by
+              that factor to cancel it out. Leave at 20 for no correction.
+            </p>
+          </details>
         </div>
       </div>
 
