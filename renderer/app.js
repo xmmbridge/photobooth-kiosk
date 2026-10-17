@@ -1538,15 +1538,18 @@ function buildCalibrationSheet() {
 }
 
 // ---------------------------------------------------------------------
-// Printer enlargement compensation. A borderless driver typically
-// enlarges the image a few percent so no white edge shows, which crops
-// content off every side. The operator measures how long a "20 mm" mark
-// actually printed (e.g. 21.5mm => the printer enlarges by 7.5%) and
-// enters it; every print is then pre-shrunk by that factor and centred,
-// so the driver's enlargement brings it back to exactly the paper size.
-// The gap that leaves around the image is filled by extending the
-// sheet's own edge pixels outward (so it's a bleed, not a white frame —
-// if the driver enlarges a touch less than expected, no sliver shows).
+// Printer scale compensation. A borderless driver typically enlarges
+// the image a few percent so no white edge shows, which crops content
+// off every side; some setups instead print a little small. The
+// operator prints the (uncorrected) calibration sheet, measures how long
+// its "20 mm" mark actually came out (e.g. 21.5mm => the printer
+// enlarges by 7.5%; 19.4mm => it shrinks by 3%) and enters it. Every
+// print is then pre-scaled by the inverse and centred, so the driver's
+// scaling brings it back to exactly the paper size.
+// When pre-shrinking, the gap left around the image is filled by
+// extending the sheet's own edge pixels outward (so it's a bleed, not a
+// white frame — if the driver enlarges a touch less than expected, no
+// sliver shows). When pre-enlarging, the outer edge is cropped off.
 // ---------------------------------------------------------------------
 const PRINT_MEASURED_KEY = 'printMeasured20mm';
 
@@ -1558,15 +1561,17 @@ function getMeasured20() {
   return 20;
 }
 
-// >= 1. Only handles printers that enlarge; 20mm measuring under 20 is
-// treated as "no correction".
+const MEASURED_MIN = 16, MEASURED_MAX = 26;
+
+// How much the printer scales the page: > 1 enlarges, < 1 shrinks.
 function printScaleFactor() {
-  return Math.min(1.3, Math.max(1, getMeasured20() / 20));
+  const v = Math.min(MEASURED_MAX, Math.max(MEASURED_MIN, getMeasured20()));
+  return v / 20;
 }
 
 function compensateForPrinter(src) {
   const k = printScaleFactor();
-  if (k < 1.001) return src;
+  if (Math.abs(k - 1) < 0.001) return src;
 
   const W = src.width, H = src.height;
   const iw = W / k, ih = H / k;
@@ -1576,6 +1581,13 @@ function compensateForPrinter(src) {
   out.width = W;
   out.height = H;
   const ctx = out.getContext('2d');
+
+  if (k < 1) {
+    // Printer shrinks: enlarge by the inverse, centred; the overflow
+    // (negative offsets) is simply cropped by the canvas.
+    ctx.drawImage(src, ox, oy, iw, ih);
+    return out;
+  }
 
   // Bleed: stretch the sheet's outermost pixel row/column (and corner
   // pixel) across the margin. Drawn first, the shrunken sheet covers the
@@ -1598,7 +1610,7 @@ function compensateForPrinter(src) {
   input.value = String(getMeasured20());
   input.addEventListener('change', () => {
     const v = parseFloat(input.value);
-    if (!Number.isFinite(v) || v < 20 || v > 26) {
+    if (!Number.isFinite(v) || v < MEASURED_MIN || v > MEASURED_MAX) {
       input.value = String(getMeasured20()); // reject nonsense, keep the last good value
       return;
     }
@@ -1606,21 +1618,29 @@ function compensateForPrinter(src) {
   });
 }
 
-document.getElementById('printCalibrationBtn').addEventListener('click', async () => {
+// The calibration sheet prints uncorrected, so the value measured off it
+// is always the printer's own scaling — never mixed up with a correction
+// already in effect. The test print goes through the correction, so its
+// 20 mm mark should then measure 20 mm.
+async function printCalibration(corrected) {
   const status = document.getElementById('printStatus');
   const deviceName = document.getElementById('printerSelect').value;
-  // Goes through the same compensation as a real print, so printing it
-  // again with a correction set verifies the correction.
-  const dataUrl = compensateForPrinter(buildCalibrationSheet()).toDataURL('image/png');
+  const sheet = buildCalibrationSheet();
+  const dataUrl = (corrected ? compensateForPrinter(sheet) : sheet).toDataURL('image/png');
 
   status.textContent = 'Printing calibration sheet…';
   try {
     await window.kiosk.print.image(dataUrl, deviceName, false, SHEET_PAGE_SIZE);
-    status.textContent = 'Calibration sheet sent — measure it against the printed paper.';
+    status.textContent = corrected
+      ? 'Test sheet sent — its 20 mm mark should now measure 20 mm.'
+      : 'Calibration sheet sent — measure its 20 mm mark and enter the value.';
   } catch (err) {
     status.textContent = `Calibration print failed: ${err.message}`;
   }
-});
+}
+
+document.getElementById('printCalibrationBtn').addEventListener('click', () => printCalibration(false));
+document.getElementById('printCalibrationTestBtn').addEventListener('click', () => printCalibration(true));
 
 // [left, right] canvases for the sheet. Normally one per side (or just
 // `left` for a single sheet); for "duplicate photos" there's only one

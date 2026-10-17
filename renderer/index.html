@@ -243,15 +243,19 @@
               against the printed paper.
             </p>
             <button id="printCalibrationBtn" class="link-btn" type="button">Print calibration sheet</button>
+            <button id="printCalibrationTestBtn" class="link-btn" type="button">Print test with correction</button>
             <div class="control-line">
               <label for="printMeasuredInput">Measured &ldquo;20 mm&rdquo; mark (mm)</label>
-              <input type="number" id="printMeasuredInput" min="20" max="26" step="0.1" value="20" />
+              <input type="number" id="printMeasuredInput" min="16" max="26" step="0.1" value="20" />
             </div>
             <p class="muted">
-              Measure a 20&nbsp;mm interval on the printed calibration sheet and
-              enter it here. If it reads longer than 20, the printer is enlarging
-              the image and cropping the edges; every print is then pre-shrunk by
-              that factor to cancel it out. Leave at 20 for no correction.
+              Print the calibration sheet (it always prints uncorrected), measure
+              a 20&nbsp;mm interval on it and enter the length here. Longer than 20
+              means the printer enlarges and crops the edges, so every print is
+              pre-shrunk to cancel it; shorter than 20 means it prints small, so
+              every print is pre-enlarged. Then use &ldquo;Print test with
+              correction&rdquo; to check: its 20&nbsp;mm mark should measure 20.
+              Leave at 20 for no correction.
             </p>
           </details>
         </div>
