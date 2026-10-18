@@ -598,8 +598,10 @@ async function punchAlphaSlots(imagePath, slots, opts = {}) {
 // strips it's cut into ('half'). Guess which from the uploaded PNG's
 // aspect ratio — whichever of the two target ratios it's closer to.
 const PRINT_SIZE_RATIOS = { full: 100 / 148, half: 50 / 148 };
+// Orientation doesn't matter here: a landscape 14.8x10cm template is a
+// full print too (it's rotated onto the paper when printed).
 function classifyPrintSize(canvasWidth, canvasHeight) {
-  const ratio = canvasWidth / canvasHeight;
+  const ratio = Math.min(canvasWidth, canvasHeight) / Math.max(canvasWidth, canvasHeight);
   const dFull = Math.abs(Math.log(ratio / PRINT_SIZE_RATIOS.full));
   const dHalf = Math.abs(Math.log(ratio / PRINT_SIZE_RATIOS.half));
   return dFull <= dHalf ? 'full' : 'half';

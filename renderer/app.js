@@ -354,7 +354,7 @@ function renderTemplatePickerGrid(containerId, printSize, selected, onPick) {
   const container = document.getElementById(containerId);
   container.innerHTML = '';
   const list = templates.filter(t => t.printSize === printSize);
-  const sizeLabel = printSize === 'full' ? '10×14.8cm' : '5×14.8cm';
+  const sizeLabel = printSize === 'full' ? '10×14.8cm (portrait or landscape)' : '5×14.8cm';
 
   if (list.length === 0) {
     container.innerHTML = `<p class="muted">No ${sizeLabel} templates yet. Click "+ Upload Template" above (or flip an existing one's size below).</p>`;
@@ -1205,12 +1205,13 @@ function sheetPlacements() {
     state: sideStates.find(s => s.canvas === canvas),
     ...containRect(canvas, x, y, w, h)
   });
+  const { w: W, h: H } = sheetSize(left, right);
   let placements = [];
   if (left && right) {
-    const cellW = SHEET_W_PX / 2;
-    placements = [place(left, 0, 0, cellW, SHEET_H_PX), place(right, cellW, 0, cellW, SHEET_H_PX)];
+    const cellW = W / 2;
+    placements = [place(left, 0, 0, cellW, H), place(right, cellW, 0, cellW, H)];
   } else if (left || right) {
-    placements = [place(left || right, 0, 0, SHEET_W_PX, SHEET_H_PX)];
+    placements = [place(left || right, 0, 0, W, H)];
   }
   return placements.filter(pl => pl.state);
 }
@@ -1219,15 +1220,16 @@ function sheetPlacements() {
 function updateSheetOverlay() {
   const overlay = document.getElementById('sheetOverlay');
   overlay.innerHTML = '';
+  const { w: W, h: H } = sheetSize(...sheetCanvasArgs());
   for (const pl of sheetPlacements()) {
     const k = pl.w / pl.state.canvas.width; // strip pixels -> sheet pixels
     pl.state.tpl.slots.forEach((slot, i) => {
       const hi = document.createElement('div');
       hi.className = 'slot-hi' + (i === pl.state.activeSlotIndex ? ' active' : '');
-      hi.style.left = ((pl.x + slot.x * k) / SHEET_W_PX * 100) + '%';
-      hi.style.top = ((pl.y + slot.y * k) / SHEET_H_PX * 100) + '%';
-      hi.style.width = (slot.w * k / SHEET_W_PX * 100) + '%';
-      hi.style.height = (slot.h * k / SHEET_H_PX * 100) + '%';
+      hi.style.left = ((pl.x + slot.x * k) / W * 100) + '%';
+      hi.style.top = ((pl.y + slot.y * k) / H * 100) + '%';
+      hi.style.width = (slot.w * k / W * 100) + '%';
+      hi.style.height = (slot.h * k / H * 100) + '%';
       overlay.appendChild(hi);
     });
   }
@@ -1398,13 +1400,44 @@ function drawContain(ctx, src, x, y, w, h) {
   ctx.drawImage(src, r.x, r.y, r.w, r.h);
 }
 
+// A single print from a landscape template (14.8x10cm) is laid out — and
+// shown and edited — landscape; toPrintOrientation() turns it upright
+// onto the portrait paper only when it's sent to the printer.
+function isLandscapeSheet(left, right) {
+  const only = left && right ? null : (left || right);
+  return !!only && only.width > only.height;
+}
+
+function sheetSize(left, right) {
+  return isLandscapeSheet(left, right)
+    ? { w: SHEET_H_PX, h: SHEET_W_PX }
+    : { w: SHEET_W_PX, h: SHEET_H_PX };
+}
+
+// The page is always portrait 10x14.8cm; a landscape sheet is rotated a
+// quarter turn onto it (the printed photo reads correctly once the paper
+// is turned sideways).
+function toPrintOrientation(sheet) {
+  if (sheet.width <= sheet.height) return sheet;
+  const out = document.createElement('canvas');
+  out.width = sheet.height;
+  out.height = sheet.width;
+  const ctx = out.getContext('2d');
+  ctx.translate(out.width, 0);
+  ctx.rotate(Math.PI / 2);
+  ctx.drawImage(sheet, 0, 0);
+  return out;
+}
+
 // Builds the full sheet canvas. `right` is null for a single 10x14.8cm
-// print; otherwise each side is contain-fitted into its half. `showGuide`
-// draws a dashed cut line down the middle — on-screen only, never printed.
+// print (landscape if its template is; see sheetSize); otherwise each side
+// is contain-fitted into its half. `showGuide` draws a dashed cut line
+// down the middle — on-screen only, never printed.
 function buildSheetCanvas(left, right, showGuide) {
   const sheet = document.createElement('canvas');
-  sheet.width = SHEET_W_PX;
-  sheet.height = SHEET_H_PX;
+  const { w, h } = sheetSize(left, right);
+  sheet.width = w;
+  sheet.height = h;
   const ctx = sheet.getContext('2d');
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, sheet.width, sheet.height);
@@ -1699,7 +1732,9 @@ async function renderPreviewStep() {
 
   document.getElementById('sheetCaption').textContent =
     wizard.layout === 'single'
-      ? 'One 10×14.8 cm print.'
+      ? (isLandscapeSheet(...sheetCanvasArgs())
+        ? 'One 14.8×10 cm landscape print (printed sideways on the paper).'
+        : 'One 10×14.8 cm print.')
       : wizard.duplicatePhotos
         ? 'Two identical 5×14.8 cm strips — adjusting either one adjusts both. Dashed line = where to cut.'
         : 'Left and right 5×14.8 cm strips. Dashed line = where to cut.';
@@ -1739,7 +1774,7 @@ document.getElementById('printBtn').addEventListener('click', async () => {
   const status = document.getElementById('printStatus');
   const deviceName = document.getElementById('printerSelect').value;
   const [left, right] = sheetCanvasArgs();
-  const sheet = compensateForPrinter(buildSheetCanvas(left, right, false));
+  const sheet = compensateForPrinter(toPrintOrientation(buildSheetCanvas(left, right, false)));
   const dataUrl = sheet.toDataURL('image/png');
 
   status.textContent = 'Printing…';
