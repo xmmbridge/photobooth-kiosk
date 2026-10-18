@@ -387,7 +387,7 @@ function renderTemplatePickerGrid(containerId, printSize, selected, onPick) {
 // thumbnail height, width follows the aspect ratio) instead of forcing
 // every thumbnail into the same box — a 5x14.8cm strip and a 10x14.8cm
 // sheet don't look alike, so they shouldn't be squeezed into one shape.
-// Hovering shows a bigger preview (see showTemplateHoverPreview).
+// Hovering shows a bigger preview (see attachHoverPreview).
 function makeTemplatePickCard(tpl, isSelected, onPick) {
   const card = document.createElement('div');
   card.className = 'template-card' + (isSelected ? ' selected' : '');
@@ -397,9 +397,7 @@ function makeTemplatePickCard(tpl, isSelected, onPick) {
     <button class="link-btn flip-size-btn">Use as ${tpl.printSize === 'full' ? '5×14.8cm' : '10×14.8cm'}</button>
   `;
   card.addEventListener('click', () => onPick(tpl));
-  card.addEventListener('mouseenter', (e) => showTemplateHoverPreview(tpl, e));
-  card.addEventListener('mousemove', placeHoverPreview);
-  card.addEventListener('mouseleave', hideTemplateHoverPreview);
+  attachHoverPreview(card, () => `file://${tpl.borderPath}?t=${Date.now()}`);
   card.querySelector('.card-delete').addEventListener('click', async (e) => {
     e.stopPropagation();
     // Saved strips remember their template; deleting it means they can't
@@ -450,19 +448,39 @@ function placeHoverPreview(e) {
   pane.style.top = Math.max(MARGIN, Math.min(top, window.innerHeight - h - MARGIN)) + 'px';
 }
 
-function showTemplateHoverPreview(tpl, e) {
+function showHoverPreview(src, large, e) {
   const pane = document.getElementById('templateHoverPreview');
   const img = document.getElementById('templateHoverPreviewImg');
   if (e) { hoverCursor.x = e.clientX; hoverCursor.y = e.clientY; }
+  pane.classList.toggle('large', large);
   // The pane's size depends on the image, so place it again once loaded.
   img.onload = () => placeHoverPreview();
-  img.src = `file://${tpl.borderPath}?t=${Date.now()}`;
+  img.src = src;
   pane.hidden = false;
   placeHoverPreview();
 }
-function hideTemplateHoverPreview() {
+function hideHoverPreview() {
+  hoverCard = null;
   document.getElementById('templateHoverPreview').hidden = true;
 }
+
+// Hovering `card` shows `src()` blown up beside the cursor. `large` gives
+// photos a bigger pane than template thumbnails, so faces are readable.
+let hoverCard = null;
+function attachHoverPreview(card, src, large = false) {
+  card.addEventListener('mouseenter', (e) => {
+    hoverCard = card;
+    showHoverPreview(src(), large, e);
+  });
+  card.addEventListener('mousemove', placeHoverPreview);
+  card.addEventListener('mouseleave', hideHoverPreview);
+}
+// Clicking a card often re-renders its grid, removing the card from under
+// the cursor without a mouseleave; hide the pane once the cursor is no
+// longer over the card it belongs to.
+document.addEventListener('mousemove', (e) => {
+  if (hoverCard && (!hoverCard.isConnected || !hoverCard.contains(e.target))) hideHoverPreview();
+});
 
 // Asks how many photo slots a just-picked template has. Pre-filled with a
 // quick best-effort guess so the common case is just hitting OK. Resolves
@@ -781,6 +799,7 @@ function renderPhotosStep() {
       <img src="${p.img.src}" />
       <p><small>${p.name}</small></p>
     `;
+    attachHoverPreview(card, () => p.img.src, true);
     card.querySelector('.card-delete').addEventListener('click', () => {
       wizard.photoPool.splice(i, 1);
       renderPhotosStep();
@@ -946,6 +965,7 @@ function renderGalleryGrid() {
       <p>${new Date(photo.datetime).toLocaleString()}</p>
     `;
     card.addEventListener('click', () => toggleGalleryPhoto(photo));
+    attachHoverPreview(card, () => `file://${photo.path}`, true);
     grid.appendChild(card);
   }
 }

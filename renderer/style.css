@@ -110,6 +110,9 @@ button:hover:not(:disabled) { background: #4f46e5; }
   z-index: 100;
   pointer-events: none;
 }
+/* Photos get a bigger pane than template thumbnails. */
+.hover-preview-pane.large { max-width: min(720px, 55vw); max-height: 85vh; }
+.hover-preview-pane.large img { max-height: calc(85vh - 20px); }
 .hover-preview-pane img {
   display: block;
   max-width: 100%;
